@@ -71,12 +71,8 @@ class TypeUser (object):
 
 class TypeReader (TypeUser):
 	def bit(self, n, bit, length=1):
-		bit = 32 - bit
-		mask = ((2 ** length) - 1) << (bit - (length))
+		mask = ((2 ** length) - 1) << bit
 		return (n & mask) >> (bit - length)
-	
-	def tobits(self, n):
-		return [int(b) for b in bin(n).lstrip('0b').zfill(8)]
 	
 	def nibbles(self, n):
 		return (n >> 4, n & 0xf)
@@ -90,40 +86,40 @@ class TypeReader (TypeUser):
 			low -= 16
 		return high, low
 	
-	def uint8(self, data, ptr):
+	def uint8(self, data, ptr=0):
 		return struct.unpack_from('%sB' % self.byteorder, data, ptr)[0], ptr + 1
 	
-	def uint16(self, data, ptr):
+	def uint16(self, data, ptr=0):
 		return struct.unpack_from('%sH' % self.byteorder, data, ptr)[0], ptr + 2
 	
-	def uint24(self, data, ptr):
+	def uint24(self, data, ptr=0):
 		return unpack_from('%sU' % self.byteorder, data, ptr)[0], ptr + 3
 	
-	def uint32(self, data, ptr):
+	def uint32(self, data, ptr=0):
 		return struct.unpack_from('%sI' % self.byteorder, data, ptr)[0], ptr + 4
 		
-	def uint64(self, data, ptr):
+	def uint64(self, data, ptr=0):
 		return struct.unpack_from('%sQ' % self.byteorder, data, ptr)[0], ptr + 8
 	
-	def int8(self, data, ptr):
+	def int8(self, data, ptr=0):
 		return struct.unpack_from('%sb' % self.byteorder, data, ptr)[0], ptr + 1
 	
-	def int16(self, data, ptr):
+	def int16(self, data, ptr=0):
 		return struct.unpack_from('%sh' % self.byteorder, data, ptr)[0], ptr + 2
 	
-	def int24(self, data, ptr):
+	def int24(self, data, ptr=0):
 		return unpack_from('%su' % self.byteorder, data, ptr)[0], ptr + 3
 	
-	def int32(self, data, ptr):
+	def int32(self, data, ptr=0):
 		return struct.unpack_from('%si' % self.byteorder, data, ptr)[0], ptr + 4
 	
-	def int64(self, data, ptr):
+	def int64(self, data, ptr=0):
 		return struct.unpack_from('%sq' % self.byteorder, data, ptr)[0], ptr + 8
 	
-	def float32(self, data, ptr):
+	def float32(self, data, ptr=0):
 		return struct.unpack_from('%sf' % self.byteorder, data, ptr)[0], ptr + 4
 	
-	def string(self, data, ptr):
+	def string(self, data, ptr=0):
 		subdata = data[ptr:]
 		try:
 			end = subdata.index(0)
@@ -147,7 +143,7 @@ class TypeReader (TypeUser):
 		else:
 			return subdata[:end].decode('utf-16-%s' % endian), ptr + end + 2
 	
-	def color(self, data, offset, format):
+	def color(self, data, ptr, format):
 		format = format.upper().strip()
 		if format == 'RGBA8':
 			sz = 4
@@ -224,15 +220,6 @@ class TypeWriter (TypeUser):
 		if align < len(s) + 2:
 			align = len(s) + 2
 		return struct.pack('%s%ds' % (self.byteorder, align), s)
-	
-	def string4(self, data):
-		endian = 'le' if self.byteorder == '<' else 'be'
-		s = data.encode('utf-8') + b'\x00'
-		if len(s) % 4 != 0:
-			pad = self.pad(4 - (len(s) % 4))
-		else:
-			pad = b''
-		return s + pad
 	
 	def pad(self, num):
 		return b'\x00' * num
@@ -629,7 +616,6 @@ def _unpack(stct, data, byteorder, refdata=(), retused=False):
 				reco = '/' + indic + str(abs(idx))
 				stct = lreplace(stct, reco, res)
 				i -= 1
-				#assert indic != 'p'
 			elif c == '#':
 				res = str(refdata[idx])
 				reco = '#' + indic + str(idx)
@@ -638,7 +624,7 @@ def _unpack(stct, data, byteorder, refdata=(), retused=False):
 			elif c == '-':
 				res = str(len(final[idx]))
 				reco = '-' + indic + str(idx)
-				stct = replace(stct, reco, res)
+				stct = lreplace(stct, reco, res)
 				i -= 1
 	return final, ptr
 
