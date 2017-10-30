@@ -374,6 +374,8 @@ def _pack(stct, data, byteorder):
 							dataptr += 1
 				elif tp == 'a':
 					pad = c - (len(final) % c)
+					if pad >= c:
+						pad = 0
 					final += b'\x00' * pad
 				elif tp == 'x':
 					final += struct.pack(byteorder + str(c) + 's', binascii.unhexlify(data[dataptr].encode('ascii')))
