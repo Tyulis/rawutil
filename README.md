@@ -2,7 +2,7 @@
 A single-file pure-python module to deal with binary packed data
 
 #Rawutil documentation
-*rawutil* is a python3 module to read and write binary packed data
+**rawutil** is a python3 module to read and write binary packed data
 
 There is two ways to use it:
 
@@ -14,19 +14,25 @@ rawutil can be used like struct, with structures stored as strings. rawutil is a
 
 rawutil has the same 3 main functions as struct:
 
-pack(stct, *data)
+pack(stct, *data) -> bytes
 
 *	Packs the elements in a bytes object as described by the stucture specified by the stct argument
+
+pack(stct, *data, file) -> None
+
+*	Packs the elements in the given file-like object as described by the stucture specified by the stct argument
 
 unpack(stct, data, refdata=())
 
 *	Unpacks the binary data given as a bytes object as described by the structure in the stct argument, and returns elements as a list
+*	data can also be a file-like object. In this case, unpacking will start at the beginning of the file (it performs a file.seek(0))
 *	The refdata option is a tuple which contains the data used by the external references, see below.
-*	Note that it won't raise an exception if the data length doesn't match the structure length.
+*	Note that unlike its struct equivalent, it won't raise an exception if the data length doesn't match the structure length.
 
 unpack_from(stct, data, offset=0, refdata=(), getptr=False)
 
 *	Unpacks the data as described by the stct argument from the specified offset, and returns elements as a list
+*	data can also be a file-like object. In this case, unpacking will start at the specified location (performs file.seek(offset))
 *	The refdata argument is used for external references, see below
 *	If getptr is True, this function returns _unpacked, ptr_ instead of only _unpacked_. The pointer is the offset where the unpacking has ended
 
@@ -70,8 +76,9 @@ First, all elements usable in _struct_ can be used with rawutil:
 	  d  | double | 64-bits double
 	  s  | string | Returns a bytes object
 	  p  | string | Exactly like s
+	  x  | void   | Padding byte: doesn't return anything
 
-Note that s should be used with a length: "12s" will return a 12-bytes bytes object, unlike "12c" which returns 12 1-bytes bytes objects. Note also that the x, P and N are not available, and n is not used as an ssize_t like in _struct_
+Note that s should be used with a length: "12s" will return a 12-bytes bytes object, unlike "12c" which returns 12 1-bytes bytes objects. Note also that the P and N are not available, and n is not used as an ssize_t like in _struct_
 
 There is also new format characters introduced in rawutil:
 
@@ -80,12 +87,13 @@ There is also new format characters introduced in rawutil:
 	  u  | int24  | Signed 24-bits (3 bytes) integer
 	  U  | uint24 | Unsigned 24-bits integer
 	  n  | string | Null-terminated string
-	  a  | pad    | Alignment
+	  a  | pad    | Alignment: aligns to a multiple of the specified number
+	  X  | hex    | Works like s but returns the bytes as an hexadecimal string
 	  $  | bytes  | Go to the end
 
 The "n" element returns a bytes object. The string is read from the current pointer position, until a null byte (0x00) is found. The null byte is not included in the returned string. At packing, it packs a bytes object, and adds a null byte at the end
 
-The "a" element performs an aligment. It should be used like "20a": the number represents the alignment. At unpacking, it places the pointer at the next multiple of the alignment. All skipped data is returned as a bytes object. At packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments)
+The "a" element performs an aligment. It should be used like "20a": the number represents the alignment. At unpacking, it places the pointer at the next multiple of the alignment. It doesn't return anything. At packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments)
 
 The "$" element represents the end. At unpacking, it returns all the remaining unread data as a bytes object, and ends the reading (it places the pointer at the data's end). At packing, it appends the corresponding bytes object in the data arguments at the end of the packed bytes, and ends the packing.
 
@@ -171,7 +179,7 @@ You can also use rawutil with objects TypeReader and TypeWriter.
 	TypeReader(byteorder='@')
 	TypeWriter(byteorder='@')
 
-The byteorder is the used byteorder mark, exactly like the format strings' one. You can also specify it using the byteorder attribute of these objects.
+The byteorder argument is the used byteorder mark, exactly like the format strings' one. You can also specify it using the byteorder attribute of these objects.
 
 You can easily subclass it to create a reader or writer class for the format you want.
 
@@ -227,6 +235,8 @@ Then, the TypeWriter object can pack some elements. It has the following methods
 	utf16string(data, align=0)
 	pad(num)  #Returns the given number of null bytes
 	align(data, alignnment)  #Returns null bytes to fill to a multiple of the alignment
+
+_Note that these methods won't work with file-like objects_
 
 Finally, the FileReader object can read elements from a file-like object. It almost has the same methods as TypeReader, but without the data argument: data is taken from the file.
 It has also the basic file-like object methods read, write, seek and tell.
