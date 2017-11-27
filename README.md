@@ -185,7 +185,7 @@ You can easily subclass it to create a reader or writer class for the format you
 
 These two objects have the pack, unpack and unpack_from methods, which are exactly the sames as the module-level ones, but if the byte order is not precised in the structure, it defaults to the byteorder attribute instead of "@".
 
-First, the TypeReader object can read elements from a bytes-like object. It has the following methods:
+First, the TypeReader object can read elements from a bytes-like or file-like object. It has the following methods:
 
 	bit(n, bit, length=1)
 		Returns the specified bits in the n integer. Returns (length) bits
@@ -212,31 +212,30 @@ The TypeReader objects have the following methods:
 	int24(data, ptr=0)
 	int32(data, ptr=0)
 	int64(data, ptr=0)
-	float32(data)
+	float32(data, ptr=0) = float(...)
+	double(data, ptr=0)  #64 bits double
 	string(data, ptr=0)  #null-terminated string, like the "n" format character
 	utf16string(data, ptr=0)  #null-terminated UTF-16 string
 
-Then, the TypeWriter object can pack some elements. It has the following methods: (data argument is the element to pack)
+Then, the TypeWriter object can pack some elements. It has the following methods: (data argument is the element to pack, out can be the output file-like objects)
 
 	nibbles(high, low)  #returns the byte formed by the two nibbles
-	signed_nibbles(high, low)  #idem
-	int8(data)
-	int16(data)
-	int24(data)
-	int32(data)
-	int64(data)
-	uint8(data)
-	uint16(data)
-	uint24(data)
-	uint32(data)
-	uint64(data)
-	float32(data)
-	string(data, align=0)  #align is the minimal size to pack. Packs a bytes object as a null-terminated string
-	utf16string(data, align=0)
+	signed_nibbles(high, low)  #idem with signed nibbles
+	int8(data, out=None)
+	int16(data, out=None)
+	int24(data, out=None)
+	int32(data, out=None)
+	int64(data, out=None)
+	uint8(data, out=None)
+	uint16(data, out=None)
+	uint24(data, out=None)
+	uint32(data, out=None)
+	uint64(data, out=None)
+	float32(data, out=None) = float(...)
+	double(data, out=None)  #64 bits double
+	string(data, align=0, out=None)  #align is the minimal size to pack. Packs a bytes object as a null-terminated string
+	utf16string(data, align=0, out=None)
 	pad(num)  #Returns the given number of null bytes
 	align(data, alignnment)  #Returns null bytes to fill to a multiple of the alignment
 
-_Note that these methods won't work with file-like objects_
-
-Finally, the FileReader object can read elements from a file-like object. It almost has the same methods as TypeReader, but without the data argument: data is taken from the file.
-It has also the basic file-like object methods read, write, seek and tell.
+There are not any non-builtin dependencies.
