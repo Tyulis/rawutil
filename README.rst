@@ -19,26 +19,23 @@ rawutil can be used like struct, with structures stored as strings. rawutil is a
 rawutil has the same 3 main functions as struct:
 
 	pack(stct, *data) -> bytes
-
--	Packs the elements in a bytes object as described by the stucture specified by the stct argument
+		Packs the elements in a bytes object as described by the stucture specified by the stct argument
 
 	pack(stct, *data, file) -> None
-
--	Packs the elements in the given file-like object as described by the stucture specified by the stct argument
+		Packs the elements in the given file-like object as described by the stucture specified by the stct argument
 
 	unpack(stct, data, refdata=())
-
--	Unpacks the binary data given as a bytes object as described by the structure in the stct argument, and returns elements as a list
--	data can also be a file-like object. In this case, unpacking will start at the beginning of the file (it performs a file.seek(0))
--	The refdata option is a tuple which contains the data used by the external references, see below.
--	Note that unlike its struct equivalent, it won't raise an exception if the data length doesn't match the structure length.
+		Unpacks the binary data given as a bytes object as described by the structure in the stct argument, and returns elements as a list
+		data can also be a file-like object. In this case, unpacking will start at the beginning of the file (it performs a file.seek(0))
+		The refdata option is a tuple which contains the data used by the external references, see below.
+		Note that unlike its struct equivalent, it won't raise an exception if the data length doesn't match the structure length.
 
 	unpack_from(stct, data, offset=0, refdata=(), getptr=False)
+		Unpacks the data as described by the stct argument from the specified offset, and returns elements as a list
+		data can also be a file-like object. In this case, unpacking will start at the specified location (performs file.seek(offset))
+		The refdata argument is used for external references, see below
+		If getptr is True, this function returns *unpacked, ptr* instead of only *unpacked*. The pointer is the offset where the unpacking has ended
 
--	Unpacks the data as described by the stct argument from the specified offset, and returns elements as a list
--	data can also be a file-like object. In this case, unpacking will start at the specified location (performs file.seek(offset))
--	The refdata argument is used for external references, see below
--	If getptr is True, this function returns _unpacked, ptr_ instead of only _unpacked_. The pointer is the offset where the unpacking has ended
 
 rawutil structures can match variable lengths, so there is not any _calcsize_ function.
 
@@ -60,13 +57,14 @@ It can begin by a character to specify the byte order, exactly like _struct_:
 | >  |  Big endian                                  |
 +----+----------------------------------------------+
 | <  |  Little endian                               |
-+====+==============================================+
++----+----------------------------------------------+
 
 When there is no byte order mark, the byte order defaults to @
 
 Then, the format string really begins. Note that, unlike *struct*'s ones, rawutil stuctures can contain as many spaces as you want.
 
 Elements
+--------
 First, all elements usable in *struct* can be used with rawutil:
 
 +-----+--------+--------------------------------------------------------+
@@ -103,7 +101,7 @@ First, all elements usable in *struct* can be used with rawutil:
 |  s  | string | Returns a bytes object                                 |
 +-----+--------+--------------------------------------------------------+
 |  x  | void   | Padding byte: doesn't return anything                  |
-+=====+========+========================================================+
++-----+--------+--------------------------------------------------------+
 
 Note that s should be used with a length: "12s" will return a 12-bytes bytes object, unlike "12c" which returns 12 1-bytes bytes objects. Note also that the P and N are not available, and n is not used as an ssize_t like in *struct*
 
@@ -172,7 +170,7 @@ Finally, rawutil includes references
 
 There is two different types of references: external and internal references.
 
-The external references are represented with '#'. They are replaced by the corresponding element in the refdata argument. For example, with this call:
+The external references are represented with '#'. They are replaced by the corresponding element in the refdata argument. For example, with this call::
 
 	data = b'<some bytes>!'
 	rawutil.unpack('#0c #1s #2c', data, refdata=(1, len(data) - 3, 2))
@@ -238,7 +236,7 @@ All its other methods takes 2 arguments:
 
 ptr is the offset to start reading. If None, reading starts at the current file position (given by file.tell()), or at 0 if data is a bytes-like object. All its other methods returns (unpacked, ptr), where unpacked is the unpacked elements, and ptr is the offset where the reading ended.
 
-The TypeReader objects have the following methods:
+The TypeReader objects have the following methods::
 
 	uint8(data, ptr=None)
 	uint16(data, ptr=None)
@@ -255,7 +253,7 @@ The TypeReader objects have the following methods:
 	string(data, ptr=None)  #null-terminated string, like the "n" format character
 	utf16string(data, ptr=None)  #null-terminated UTF-16 string
 
-Then, the TypeWriter object can pack some elements. It has the following methods: (data argument is the element to pack, out can be the output file-like objects)
+Then, the TypeWriter object can pack some elements. It has the following methods: (data argument is the element to pack, out can be the output file-like objects)::
 
 	nibbles(high, low)  #returns the byte formed by the two nibbles
 	signed_nibbles(high, low)  #idem with signed nibbles
