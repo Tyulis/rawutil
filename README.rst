@@ -37,13 +37,13 @@ rawutil has the same 3 main functions as struct:
 		If getptr is True, this function returns *unpacked, ptr* instead of only *unpacked*. The pointer is the offset where the unpacking has ended
 
 
-rawutil structures can match variable lengths, so there is not any _calcsize_ function.
+rawutil structures can match variable lengths, so there is not any *calcsize* function.
 
 String structures reference
 ----------------------------
 The structure is a str object.
 
-It can begin by a character to specify the byte order, exactly like _struct_:
+It can begin by a character to specify the byte order, exactly like *struct*:
 
 +----+----------------------------------------------+
 |Chr.| Effect                                       |
