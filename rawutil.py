@@ -595,7 +595,6 @@ class _pack (_StructParser, _ClsFunc):
 						subptr -= groupbase
 					length = count - (subptr % count or count)
 					self.final.write(length * b'\x00')
-					print(subptr, length)
 				elif el == '?':
 					for _ in range(count):
 						self.final.write(struct.pack('B', data[ptr]))
