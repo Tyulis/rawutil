@@ -7,7 +7,7 @@ import builtins
 import binascii
 from collections import namedtuple
 
-__version__ = '2.4.8'
+__version__ = '2.4.10'
 
 ENDIANNAMES = {
 	'=': sys.byteorder,
@@ -590,9 +590,12 @@ class _pack (_StructParser, _ClsFunc):
 							sub = sub.encode('utf-8')
 						self.final.write(sub + b'\x00')
 				elif el == 'a':
-					subptr = self.final.tell() - groupbase
+					subptr = self.final.tell()
+					if groupbase != subptr:
+						subptr -= groupbase
 					length = count - (subptr % count or count)
 					self.final.write(length * b'\x00')
+					print(subptr, length)
 				elif el == '?':
 					for _ in range(count):
 						self.final.write(struct.pack('B', data[ptr]))
@@ -664,6 +667,7 @@ if __name__ == '__main__':
 	assert f == raw
 	file = open('test.bin', 'wb')
 	pack(s, *data, file)
+	pack('100a', file)
 	file.close()
 	file = open('test.bin', 'rb')
 	d = unpack(s, file)
