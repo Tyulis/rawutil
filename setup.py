@@ -10,7 +10,7 @@ with open(os.path.join(here, "README.rst"), 'r', encoding="utf-8") as readme:
 
 setup(
 	name="rawutil",
-	version="2.4.10",
+	version="2.4.11",
 	description="A single-file, pure-python package to deal with binary packed data",
 	long_description = longdesc,
 	url="https://github.com/Tyulis/rawutil",
@@ -24,12 +24,14 @@ setup(
 		"Intended Audience :: Developers",
 		"License :: OSI Approved :: MIT License",
 		"Programming Language :: Python :: 3 :: Only",
+		"Programming Language :: Python :: 3.4",
 		"Programming Language :: Python :: 3.5",
 		"Programming Language :: Python :: 3.6",
 		"Programming Language :: Python :: 3.7",
 		"Topic :: Utilities",
+		"Operating System :: OS Independent",
 	],
 	keywords = "structures struct binary bytes formats",
 	py_modules = ["rawutil"],
-	python_requires = ">=3.5",
+	python_requires = ">=3.4",
 )

@@ -7,7 +7,7 @@ import builtins
 import binascii
 from collections import namedtuple
 
-__version__ = '2.4.10'
+__version__ = '2.4.11'
 
 ENDIANNAMES = {
 	'=': sys.byteorder,
@@ -665,7 +665,7 @@ if __name__ == '__main__':
 	f = pack(s, *data)
 	assert f == raw
 	file = open('test.bin', 'wb')
-	pack(s, *data, file)
+	pack(s, *(data + [file]))
 	pack('100a', file)
 	file.close()
 	file = open('test.bin', 'rb')

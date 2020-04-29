@@ -14,9 +14,9 @@ There is two ways to use it:
 
 1-String structures
 -------------------
-rawutil can be used like struct, with structures stored as strings. rawutil is almost fully compatible with struct. If in a program, you can replace all instances of "struct" by "rawutil", it should work exactly same (see below for problems).
+rawutil can be used like struct, with structures stored as strings. rawutil is almost fully compatible with struct. If in a program, you can replace all instances of "struct" by "rawutil", it should work exactly same (see below for differences).
 
-rawutil has the same 3 main functions as struct:
+rawutil has the same 3 main functions as struct::
 
 	pack(stct, *data) -> bytes
 		Packs the elements in a bytes object as described by the stucture specified by the stct argument
@@ -125,7 +125,7 @@ There is also new format characters introduced in rawutil:
 
 The "n" element returns a bytes object. The string is read from the current pointer position, until a null byte (0x00) is found. The null byte is not included in the returned string. At packing, it packs a bytes object, and adds a null byte at the end
 
-The "a" element performs an aligment. It should be used like "20a": the number represents the alignment. At unpacking, it places the pointer at the next multiple of the alignment. It doesn't return anything. At packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments)
+The "a" element performs an alignment. It should be used like "20a": the number represents the alignment. When unpacking, it places the pointer at the next multiple of the alignment. It doesn't return anything. When packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments)
 
 The "$" element represents the end. At unpacking, it returns all the remaining unread data as a bytes object, and ends the reading (it places the pointer at the data's end). At packing, it appends the corresponding bytes object in the data arguments at the end of the packed bytes, and ends the packing.
 
