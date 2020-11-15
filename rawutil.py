@@ -7,7 +7,7 @@ import builtins
 import binascii
 from collections import namedtuple
 
-__version__ = '2.4.10'
+__version__ = '2.5.0'
 
 ENDIANNAMES = {
 	'=': sys.byteorder,
@@ -144,8 +144,8 @@ class TypeReader (TypeUser):
 	int24 = _readermethod('u')
 	int32 = _readermethod('i')
 	int64 = _readermethod('q')
-	float32 = float = _readermethod('f')
-	double = _readermethod('d')
+	float32 = float = single = _readermethod('f')
+	float64 = double = _readermethod('d')
 	string = _readermethod('n')
 	
 	def utf16string(self, data, ptr):
@@ -194,11 +194,12 @@ class TypeWriter (TypeUser):
 	int24 = _writermethod('u')
 	int32 = _writermethod('i')
 	int64 = _writermethod('q')
-	float32 = float = _writermethod('f')
-	double = _writermethod('d')
+	float32 = float = single = _writermethod('f')
+	float64 = double = _writermethod('d')
 	
 	def string(self, data, align=0, out=None):
-		s = data.encode('utf-8')
+		if isinstance(data, str):
+			s = data.encode('utf-8')
 		if align < len(s) + 1:
 			align = len(s) + 1
 		res = struct.pack('%s%ds' % (self.byteorder, align), s)
@@ -222,7 +223,11 @@ class TypeWriter (TypeUser):
 		return b'\x00' * num
 	
 	def align(self, data, alignment):
-		padding = alignment - (len(data) % alignment or alignment)
+		if isinstance(data, int):
+			length = data
+		else:
+			length = len(data)
+		padding = alignment - (length % alignment or alignment)
 		return b'\x00' * padding
 
 
@@ -331,7 +336,10 @@ class _unpack (_ClsFunc, _StructParser):
 					count = final[-count.index]
 			if isinstance(el, _Sub):
 				if el.type == '()':
-					final.append(self.unpack(el.stct)[0])
+					result = []
+					for i in range(count):
+						result.extend(self.unpack(el.stct)[0])
+					final.append(result)
 				elif el.type == '[]':
 					final.append([self.unpack(el.stct)[0] for i in range(count)])
 				elif el.type == '{}':
@@ -378,6 +386,8 @@ class _unpack (_ClsFunc, _StructParser):
 				elif el == '$':
 					final.append(self.data[self.ptr:])
 					break
+				elif el == '|':
+					groupbase = self.ptr
 				else:
 					#Avoids copy of the entire data
 					substruct = '%s%d%s' % (self.byteorder, count, el)
@@ -399,7 +409,10 @@ class _unpack (_ClsFunc, _StructParser):
 					count = final[-count.index]
 			if isinstance(el, _Sub):
 				if el.type == '()':
-					final.append(self.unpack_file(el.stct)[0])
+					result = []
+					for i in range(count):
+						result.extend(self.unpack_file(el.stct)[0])
+					final.append(result)
 				elif el.type == '[]':
 					final.append([self.unpack_file(el.stct)[0] for i in range(count)])
 				elif el.type == '{}':
@@ -446,6 +459,8 @@ class _unpack (_ClsFunc, _StructParser):
 				elif el == '$':
 					final.append(self.data.read())
 					break
+				elif el == '|':
+					groupbase = self.data.tell()
 				else:
 					#Avoids copy of the entire data
 					substruct = '%s%d%s' % (self.byteorder, count, el)
@@ -480,7 +495,10 @@ class _pack (_StructParser, _ClsFunc):
 					count = data[ptr - count.index]
 			if isinstance(el, _Sub):
 				if el.type == '()':
-					self.pack(el.stct, data[ptr])
+					group = data[ptr]
+					groupptr = 0
+					for i in range(count):
+						groupptr += self.pack(el.stct, group[groupptr:])
 					ptr += 1
 				elif el.type == '[]':
 					[self.pack(el.stct, data[ptr][i]) for i in range(count)]
@@ -531,11 +549,14 @@ class _pack (_StructParser, _ClsFunc):
 				elif el == '$':
 					self.final += data[ptr]
 					break
+				elif el == '|':
+					groupbase = len(self.final)
 				else:
 					substruct = '%s%d%s' % (self.byteorder, count, el)
 					subdata = data[ptr: ptr + count]
 					ptr += count
 					self.final += struct.pack(substruct, *subdata)
+		return ptr
 	
 	def pack_file(self, stct, data):
 		ptr = 0
@@ -549,7 +570,10 @@ class _pack (_StructParser, _ClsFunc):
 					count = data[ptr - count.index]
 			if isinstance(el, _Sub):
 				if el.type == '()':
-					self.pack_file(el.stct, data[ptr])
+					group = data[ptr]
+					groupptr = 0
+					for i in range(count):
+						groupptr += self.pack_file(el.stct, group[groupptr:])
 					ptr += 1
 				elif el.type == '[]':
 					[self.pack_file(el.stct, data[ptr][i]) for i in range(count)]
@@ -602,11 +626,14 @@ class _pack (_StructParser, _ClsFunc):
 				elif el == '$':
 					self.final.write(data[ptr])
 					break
+				elif el == '|':
+					groupbase = self.final.tell()
 				else:
 					substruct = '%s%d%s' % (self.byteorder, count, el)
 					subdata = data[ptr: ptr + count]
 					ptr += count
 					self.final.write(struct.pack(substruct, *subdata))
+		return ptr
 
 
 def unpack(stct, data, names=None, refdata=()):
@@ -659,18 +686,18 @@ def pack(stct, *data):
 
 if __name__ == '__main__':
 	#test
-	s = '>4s2I/p1[H(2B)] n4a 5X2x? 2u'
-	raw = b'TESTaaaa\x00\x00\x00\x02GGhiJJklRETEST\x00\x00YBOOM\x00\x00\x01333666'
+	s = '>4s2I/p1[H(2B)] n4a 5X2x? 2u /2(HBB)'
+	raw = b'TESTaaaa\x00\x00\x00\x02GGhiJJklRETEST\x00\x00YBOOM\x00\x00\x01333666\x11\x11\x22\x33\x44\x44\x55\x66'
 	data = unpack(s, raw)
 	f = pack(s, *data)
 	assert f == raw
 	file = open('test.bin', 'wb')
-	pack(s, *data, file)
+	pack(s, *(data + [file]))
 	pack('100a', file)
 	file.close()
 	file = open('test.bin', 'rb')
 	d = unpack(s, file)
 	assert d == data
-	names = 'magic, int, entrycount, entries, somestring, hex, abool, int24_1, int24_2'
+	names = 'magic, int, entrycount, entries, somestring, hex, abool, int24_1, int24_2, multigroup'
 	n = unpack(s, raw, names)
 	assert list(n) == d

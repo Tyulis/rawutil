@@ -61,7 +61,7 @@ It can begin by a character to specify the byte order, exactly like *struct*:
 
 When there is no byte order mark, the byte order defaults to @
 
-Then, the format string really begins. Note that, unlike *struct*'s ones, rawutil stuctures can contain as many spaces as you want.
+Then, the format string really begins. Note that rawutil stuctures can contain as many spaces as you want to improve readability.
 
 Elements
 --------
@@ -116,16 +116,17 @@ There is also new format characters introduced in rawutil:
 +-----+--------+-------------------------------------------------------------+
 |  n  | string | Null-terminated string                                      |
 +-----+--------+-------------------------------------------------------------+
-|  a  | pad    | Alignment: aligns to a multiple of the specified number     |
+|  a  |        | Alignment: aligns to a multiple of the specified number     |
 +-----+--------+-------------------------------------------------------------+
 |  X  | hex    | Works like s but returns the bytes as an hexadecimal string |
 +-----+--------+-------------------------------------------------------------+
-|  $  | bytes  | Go to the end                                               |
+|  $  | bytes  | Goes to the end                                             |
 +-----+--------+-------------------------------------------------------------+
 
-The "n" element returns a bytes object. The string is read from the current pointer position, until a null byte (0x00) is found. The null byte is not included in the returned string. At packing, it packs a bytes object, and adds a null byte at the end
+The "n" element returns a bytes object. The string is read from the current pointer position, until a null byte (0x00) is found. The null byte is not included in the returned string. When packing, it packs a bytes object, and adds a null byte at the end.
 
-The "a" element performs an aligment. It should be used like "20a": the number represents the alignment. At unpacking, it places the pointer at the next multiple of the alignment. It doesn't return anything. At packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments)
+The "a" element performs an aligment. It should be used like "20a": the number represents the alignment. At unpacking, it places the pointer at the next multiple of the alignment. It doesn't return anything. At packing, it will add null bytes until a multiple of the aligment length is reached (skip it in the data arguments).
+You can set the alignment reference with a "|", the alignment will then be calculated with regard to the last read "|" character.
 
 The "$" element represents the end. At unpacking, it returns all the remaining unread data as a bytes object, and ends the reading (it places the pointer at the data's end). At packing, it appends the corresponding bytes object in the data arguments at the end of the packed bytes, and ends the packing.
 
@@ -138,11 +139,21 @@ The () element represents a group. It should be used like that:
 
 	"4s I2H (2B 2H) 20a"
 
-All elements between the brackets will be unpacked as a substructure, in a list. Here, it can returns for example:
+All elements between the brackets will be unpacked as a substructure, in a list. Here, it can return for example:
 
 	[b'test', 10000, 326, 1919, [11, 19, 112, 1222] , b'\x00\x00']
 
-At packing, all data packed in the group should be in a list, like this.
+When packing, all data packed in the group should be in a list, like that.
+
+It is also possible to give an amount of times to unpack the group. The instances of that group will then all be in the same list :
+
+	"2(2I)"
+	"2(n)"
+
+May give :
+
+	[1, 2, 3, 4]
+	[b'foo', b'bar']
 
 Then, the [] element is an iterator. It should be used like that:
 
@@ -185,13 +196,22 @@ Then, the internal references. They are represented by a "/", and should be used
 
 The number near the "/" is the index of the reference. The reference will be replaced by the unpacked element at the specified index, here the second "B", so with this data:
 
-	b'TEST\xff\x06zyXWvuTSrqPO'
+	b'TEST\xff\x06aaBBccDDeeFF'
 
 It will return:
 
-	[b'TEST', 255, 6, [[b'zy'], [b'XW'], [b'vu'], [b'TS'], [b'rq'], [b'PO']]]
+	[b'TEST', 255, 6, [[b'aa'], [b'BB'], [b'cc'], [b'DD'], [b'ee'], [b'FF']]]
 
 Here, the element 2 of the unpacked elements contains 6, so the "/2" is replaced by "6", so it is interpreted as '4s 2B 6[2s]', so [2s] is unpacked as many times as specified by the element 2.
+You can also do the same with a group to flatten all those instances in the same list : with that same data, the structure :
+
+	'4s 2B /2(2s)'
+
+Will return :
+
+	[b'TEST', 255, 6, [b'aa', b'BB', b'cc', b'DD', b'ee', b'FF']]
+	
+Note that references are local to the group they are in.
 
 Internal references can also be relative, with '/p'. You can use for example this structure:
 
@@ -205,7 +225,7 @@ It will return:
 
 	[4, 255, [[b'JJ', b'kk', b'LL', b'mm']]]
 
-So the "/p2" will be replaced by the element situated 2 elements before, here, the first B, so here, 4
+So the "/p2" will be replaced by the element situated 2 elements before, here, the first B, so 4
 
 Objects
 =======
