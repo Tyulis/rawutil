@@ -14,9 +14,9 @@ There is two ways to use it:
 
 1-String structures
 -------------------
-rawutil can be used like struct, with structures stored as strings. rawutil is almost fully compatible with struct. If in a program, you can replace all instances of "struct" by "rawutil", it should work exactly same (see below for problems).
+rawutil can be used like struct, with structures stored as strings. rawutil is almost fully compatible with struct. If in a program, you can replace all instances of "struct" by "rawutil", it should work exactly same (see below for differences).
 
-rawutil has the same 3 main functions as struct:
+rawutil has the same 3 main functions as struct::
 
 	pack(stct, *data) -> bytes
 		Packs the elements in a bytes object as described by the stucture specified by the stct argument

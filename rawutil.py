@@ -7,6 +7,7 @@ import builtins
 import binascii
 from collections import namedtuple
 
+
 __version__ = '2.5.0'
 
 ENDIANNAMES = {
