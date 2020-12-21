@@ -4,15 +4,16 @@ import os
 from setuptools import setup
 
 here = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(here, "README.rst"), 'r', encoding="utf-8") as readme:
+with open(os.path.join(here, "README.md"), 'r', encoding="utf-8") as readme:
 	longdesc = readme.read()  #Good joke.
 
 
 setup(
 	name="rawutil",
-	version="2.5.0",
-	description="A single-file, pure-python package to deal with binary packed data",
+	version="2.6.0",
+	description="A pure-python module to read and write binary data",
 	long_description = longdesc,
+	long_description_content_type="text/markdown",
 	url="https://github.com/Tyulis/rawutil",
 	author="Tyulis",
 	author_email="tyulis@laposte.net",
