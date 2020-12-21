@@ -423,6 +423,8 @@ class Struct (object):
 				intpart = int(normalised)
 				mantissa = (mantissa << 1) | intpart
 				normalised -= intpart
+			if 0.5 < normalised < 1 or (normalised == 0.5 and mantissa & 1):  # rounding to the nearest, ties to even
+				mantissa += 1
 			
 			exponent += bias
 			
