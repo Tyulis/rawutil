@@ -227,7 +227,7 @@ External references are fixed too, and supposed to be in sequence in `refdata`.
 
 Note that if the added structures have different byte order marks, the resulting structure will always retain the byte order of the left operand.
 
-### Exception
+### Exceptions
 
 Rawutil defines two types of exception :
 
@@ -248,7 +248,7 @@ Those are the same as in `struct`, except `@` that is equivalent to `=` instead 
 | =    | System byte order (as defined by sys.byteorder) |
 | @    | Equivalent to =, system byte order |
 | >    | Big endian (most significant byte last) |
-| <    | Little endian (most significant byte first) |
+| <    | Little endian (least significant byte first) |
 | !    | Network byte order (big endian as defined by RFC 1700 |
 
 If no byte order is defined in a structure, it is set to system byte order by default.
