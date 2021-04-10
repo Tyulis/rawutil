@@ -190,12 +190,13 @@ Trying to compute the size of a structure that includes any of those elements wi
 ### Struct
 
 ```python
-Struct(format)
+Struct(format, names=None)
 ```
 
 Struct objects allow to pre-parse format strings once and for all. 
 Indeed, using only format strings will force to parse them every time you use them.
 If a structure is used more than once, it will thus save time to wrap it in a Struct object.
+You can also set the element names once, they will then be used by default every time you unpack data with that structure.
 Any function that accepts a format string also accepts Struct objects.
 For convenience, Struct also defines the module-level functions, for the structure it represents (without the `structure` argument as it is for the represented structure) :
 

@@ -5,11 +5,12 @@
 import io
 import sys
 import math
+import copy
 import builtins
 import binascii
 import collections
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
@@ -139,22 +140,36 @@ _STRUCTURE_CHARACTERS = {
 }
 
 class Struct (object):
-	def __init__(self, format=""):
-		self.format = format
+	def __init__(self, format="", names=None):
+		self.names = None
 		if isinstance(format, Struct):
 			self.format = format.format
-			self.tokens = format.tokens
+			self.byteorder = format.byteorder
+			self.forcebyteorder = format.forcebyteorder
+			self.tokens = copy.deepcopy(format.tokens)
+			self.names = format.names
 		elif len(format) > 0:
+			self.format = format
+			self.byteorder = sys.byteorder
+			self.forcebyteorder = False
 			self.parse_struct(format)
 		else:
+			self.format = format
+			self.byteorder = sys.byteorder
+			self.forcebyteorder = False
 			self.tokens = []
+			
+		if hasattr(names, '_fields') and hasattr(names, '_asdict'):  #trying to recognize a namedtuple
+			self.names = names
+		elif names is not None:
+			self.names = collections.namedtuple('RawutilNameSpace', names)
 	
 	def parse_struct(self, format):
-		self.byteorder = sys.byteorder
 		format = self.preprocess(format)
 		if format[0] in tuple(ENDIANNAMES.keys()):
 			self.byteorder = ENDIANNAMES[format[0]]
-			format = format[1:]
+			self.forcebyteorder = True
+			self.format = format = format[1:]
 		
 		self.tokens = self.parse_substructure(format)
 	
@@ -243,6 +258,12 @@ class Struct (object):
 				out += "\n".join(["\t" + line for line in substruct.splitlines()]) + "\n"
 		return out
 	
+	def setbyteorder(self, byteorder):
+		if byteorder in ENDIANNAMES:
+			byteorder = ENDIANNAMES[byteorder]
+		self.forcebyteorder = True
+		self.byteorder = byteorder
+	
 	def unpack(self, data, names=None, refdata=()):
 		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
 			unpacked = self._unpack_file(data, self.tokens, refdata)
@@ -253,6 +274,8 @@ class Struct (object):
 			unpacked = names(unpacked)
 		elif names is not None:
 			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+		elif self.names is not None:
+			unpacked = self.names(*unpacked)
 		return unpacked
 	
 	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False):
@@ -270,6 +293,8 @@ class Struct (object):
 			unpacked = names(unpacked)
 		elif names is not None:
 			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+		elif self.names is not None:
+			unpacked = self.names(*unpacked)
 		
 		if getptr:
 			return unpacked, data.tell()
@@ -315,6 +340,8 @@ class Struct (object):
 				unpacked = names(unpacked)
 			elif names is not None:
 				unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+			elif self.names is not None:
+				unpacked = self.names(*unpacked)
 			yield unpacked
 	
 	def calcsize(self, refdata=None, tokens=None):
@@ -702,9 +729,10 @@ class Struct (object):
 		newtokens, newformat = self._add_structs(self.tokens, stct.tokens)
 		
 		newstruct = Struct()
-		newstruct.byteorder = self.byteorder
+		newstruct.format = newformat
 		newstruct.tokens = newtokens
-		newstruct.format = ENDIANMARKS[self.byteorder] + newformat
+		if self.forcebyteorder:
+			newstruct.setbyteorder(self.byteorder)
 		return newstruct
 	
 	def __iadd__(self, stct):
@@ -713,7 +741,7 @@ class Struct (object):
 		newtokens, newformat = self._add_structs(self.tokens, stct.tokens)
 		
 		self.tokens = newtokens
-		self.format = ENDIANMARKS[self.byteorder] + newformat
+		self.format = newformat
 		return newstruct
 	
 	def __radd__(self, stct):
@@ -722,33 +750,36 @@ class Struct (object):
 		newtokens, newformat = self._add_structs(stct.tokens, self.tokens)
 		
 		newstruct = Struct()
-		newstruct.byteorder = stct.byteorder
+		if stct.forcebyteorder:
+			newstruct.setbyteorder(stct.byteorder)
 		newstruct.tokens = newtokens
-		newstruct.format = ENDIANMARKS[stct.byteorder] + newformat
+		newstruct.format = newformat
 		return newstruct
 	
 	def __mul__(self, n):
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
 		
 		newstruct = Struct()
-		newstruct.byteorder = self.byteorder
+		if self.forcebyteorder:
+			newstruct.setbyteorder(self.byteorder)
 		newstruct.tokens = newtokens
-		newstruct.format = ENDIANMARKS[self.byteorder] + newformat
+		newstruct.format = newformat
 		return newstruct
 	
 	def __imul__(self, n):
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
 		self.tokens = newtokens
-		self.format = ENDIANMARKS[self.byteorder] + newformat
+		self.format = newformat
 		return self
 
 	def __rmul__(self, n):
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
 		
 		newstruct = Struct()
-		newstruct.byteorder = self.byteorder
+		if stct.forcebyteorder:
+			newstruct.setbyteorder(stct.byteorder)
 		newstruct.tokens = newtokens
-		newstruct.format = ENDIANMARKS[self.byteorder] + newformat
+		newstruct.format = newformat
 		return newstruct
 	
 	def __repr__(self):
@@ -764,50 +795,50 @@ class TypeUser (object):
 	
 	def unpack(self, structure, data, names=None, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.unpack(data, names, refdata)
 	
 	def unpack(self, structure, data, names=None, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.unpack(data, names, refdata)
 
 	def unpack_from(self, structure, data, offset=None, names=None, refdata=(), getptr=False):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.unpack_from(data, offset, names, refdata, getptr)
 
 	def iter_unpack(self, structure, data, names=None, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.iter_unpack(data, names, refdata)
 
 	def pack(self, structure, *data, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.pack(*data, refdata=refdata)
 
 	def pack_into(self, structure, buffer, offset, *data, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.pack_into(buffer, offset, *data, refdata=refdata)
 	
 	def pack_file(self, structure, file, *data, position=None, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.pack_file(file, *data, position=position, refdata=refdata)
 
 	def calcsize(self, structure, refdata=()):
 		stct = Struct(structure)
-		if stct.format[0] not in ENDIANNAMES:
-			stct.byteorder = self.byteorder
+		if not stct.forcebyteorder:
+			stct.setbyteorder(self.byteorder)
 		return stct.calcsize()
 
 def _readermethod(stct):
@@ -865,7 +896,7 @@ class TypeReader (TypeUser):
 			s.append(c)
 			if zeroes >= 2 and i % 2 == 1:
 				break
-		endian = 'le' if self.byteorder == '<' else 'be'
+		endian = 'le' if self.byteorder == 'little' else 'be'
 		return bytes(s[:-2]).decode('utf-16-%s' % endian), ptr + i
 
 def _writermethod(stct):
@@ -915,7 +946,7 @@ class TypeWriter (TypeUser):
 			out.write(res)
 	
 	def utf16string(self, data, align=0, out=None):
-		endian = 'le' if self.byteorder == '<' else 'be'
+		endian = 'le' if self.byteorder == 'little' else 'be'
 		s = data.encode('utf-16-%s' % endian) + b'\x00\x00'
 		if align < len(s) + 2:
 			align = len(s) + 2
@@ -935,6 +966,33 @@ class TypeWriter (TypeUser):
 			length = len(data)
 		padding = alignment - (length % alignment or alignment)
 		return b'\x00' * padding
+
+
+class StructurePack (object):
+	def __init__(self, **structs):
+		self.structs = {}
+		for name, struct in structs.items():
+			if not isinstance(struct, Struct):
+				struct = Struct(struct)
+			self.structs[name] = struct
+	
+	def asbyteorder(self, byteorder, force=False):
+		if byteorder in ENDIANNAMES:
+			byteorder = ENDIANNAMES[byteorder]
+		newpack = self.copy()
+		for name, struct in newpack.structs.items():
+			if (struct.forcebyteorder and force) or not struct.forcebyteorder:
+				struct.setbyteorder(byteorder)
+		return newpack
+	
+	def copy(self):
+		newpack = StructurePack()
+		for name, struct in self.structs.items():
+			newpack.structs[name] = Struct(struct)
+		return newpack
+	
+	def __getattr__(self, attr):
+		return self.structs[attr]
 
 def unpack(structure, data, names=None, refdata=()):
 	stct = Struct(structure)
