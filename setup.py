@@ -10,7 +10,7 @@ with open(os.path.join(here, "README.md"), 'r', encoding="utf-8") as readme:
 
 setup(
 	name="rawutil",
-	version="2.7.0",
+	version="2.7.1",
 	description="A pure-python module to read and write binary data",
 	long_description = longdesc,
 	long_description_content_type="text/markdown",
