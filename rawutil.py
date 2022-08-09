@@ -10,7 +10,7 @@ import builtins
 import binascii
 import collections
 
-__version__ = "2.7.1"
+__version__ = "2.7.2"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
@@ -90,10 +90,17 @@ class OperationError (Exception):
 class DataError (OperationError):
 	pass
 
+class ResolutionError (OperationError):
+	pass
+
 	
 	
 class _Reference (object):
-	REFERENCE_TYPES = {0: None, 1: "relative", 2: "absolute", 3: "external"}
+	Relative = 1
+	Absolute = 2
+	External = 3
+	
+	_REFERENCE_TYPE_NAMES = {0: None, Relative: "relative", Absolute: "absolute", External: "external"}
 	def __init__(self, type, value):
 		self.type = type
 		self.value = value
@@ -102,7 +109,7 @@ class _Reference (object):
 		return _Reference(self.type, self.value)
 	
 	def __str__(self):
-		return "Ref(" + self.REFERENCE_TYPES[self.type] + ", " + str(self.value) + ")"
+		return "Ref(" + self._REFERENCE_TYPE_NAMES[self.type] + ", " + str(self.value) + ")"
 	
 	def __repr(self):
 		return "_Reference(" + str(self.type) + ", " + str(self.value) + ")"
@@ -133,7 +140,7 @@ class _Token (object):
 
 _GROUP_CHARACTERS = {"(": ")", "[": "]", "{": "}"}
 _NO_MULTIPLE = "{|$"
-_END_STRUCTURE = "$"
+_END_STRUCTURE = "{$"
 _INTEGER_ELEMENTS = {  # (signed, size in bytes)
 	"b": (True, 1), "B": (False, 1), "h": (True, 2), "H": (False, 2), 
 	"u": (True, 3), "U": (False, 3), "i": (True, 4), "I": (False, 4),
@@ -142,15 +149,20 @@ _INTEGER_ELEMENTS = {  # (signed, size in bytes)
 _FLOAT_ELEMENTS = {  # (size in bytes, exponent bits, factor bits, -exponent, maxvalue)
 	"e": (2, 5, 10, 15), "f": (4, 8, 23, 127), "d": (8, 11, 52, 1023), "F": (16, 15, 112, 16383),
 }
-_STRUCTURE_CHARACTERS = {
-	"?": 1, "b": 1, "B": 1, "h": 2, "H": 2, "u": 3, "U": 3,
-	"i": 4, "I": 4, "l": 4, "L": 4, "q": 8, "Q": 8, "e": 2, "f": 4, "d": 8,
-	"F": 16, "c": 1, "s": 1, "n": None, "X": 1, "|": 0, "a": -1, "x": 1, "$": None,
+_STRUCTURE_CHARACTERS = {  # (size in bytes or None if indeterminate, referencable, direct count or None if not counted at all)
+	"?": (1, True, True), "b": (1, True, True), "B": (1, True, True),
+	"h": (2, True, True), "H": (2, True, True), "u": (3, True, True), "U": (3, True, True),
+	"i": (4, True, True), "I": (4, True, True), "l": (4, True, True), "L": (4, True, True),
+	"q": (8, True, True), "Q": (8, True, True), "e": (2, False, True), "f": (4, False, True),
+	"d": (8, False, True), "F": (16, False, True), "c": (1, False, True), "s": (1, False, False),
+	"n": (None, False, True), "X": (1, False, False), "|": (0, False, None), "a": (-1, False, False),
+	"x": (1, False, True), "$": (None, False, False),
 }
 
 class Struct (object):
-	def __init__(self, format="", names=None):
+	def __init__(self, format="", names=None, safe_references=True):
 		self.names = None
+		self.safe_references = safe_references
 		if isinstance(format, Struct):
 			self.format = format.format
 			self.byteorder = format.byteorder
@@ -192,6 +204,9 @@ class Struct (object):
 	
 	def parse_substructure(self, format):
 		tokens = []
+		cut_countable = False
+		first_countable = 0
+		last_countable = 0
 		ptr = 0
 		while ptr < len(format):
 			startptr = ptr
@@ -199,12 +214,12 @@ class Struct (object):
 			if format[ptr] == "/":
 				ptr += 1
 				if format[ptr] == "p":  # Relative
-					reftype = 1
+					reftype = _Reference.Relative
 					ptr += 1
 				else:  # Absolute
-					reftype = 2
+					reftype = _Reference.Absolute
 			elif format[ptr] == "#":  # Extern reference
-				reftype = 3
+				reftype = _Reference.External
 				ptr += 1
 			else:  # Normal count
 				reftype = None
@@ -222,6 +237,18 @@ class Struct (object):
 			else:
 				count = int(countstr)
 				if reftype is not None:
+					if reftype == _Reference.Absolute:
+						if not cut_countable and count >= first_countable:
+							raise FormatError("Invalid reference index : absolute reference unambiguously references itself or elements located after itself", self.format, format, startptr)
+						elif self.safe_references and count >= first_countable:
+							raise FormatError("Unsafe reference index : absolute reference references in or after an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, format, startptr)
+					if reftype == _Reference.Relative:
+						if count <= 0:
+							raise FormatError("Invalid reference index : relative reference references itself (the immediate previous element is /p1)", self.format, format, startptr)
+						elif not cut_countable and count > last_countable:
+							raise FormatError("Invalid reference index : relative reference references beyond the beginning of the format", self.format, format, startptr)
+						elif self.safe_references and count > last_countable:
+							raise FormatError("Unsafe reference index : relative reference references in or beyond an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, format, startptr)
 					count = _Reference(reftype, count)
 			
 			# Groups
@@ -230,14 +257,17 @@ class Struct (object):
 				closechar = _GROUP_CHARACTERS[format[ptr]]
 				subformat = ""
 				ptr += 1
+				elements = 1
 				level = 1
-				while level > 0:
+				while level > 0 and ptr < len(format):
 					subformat += format[ptr]
 					if format[ptr] == openchar:
 						level += 1
 					elif format[ptr] == closechar:
 						level -= 1
 					ptr += 1
+				if level > 1:
+					raise FormatError("Group starting with '" + openchar + "' is never closed")
 				subformat = subformat[:-1]
 				type = openchar
 				content = self.parse_substructure(subformat)
@@ -246,14 +276,33 @@ class Struct (object):
 					raise FormatError("Unrecognised character '" + format[ptr] + "'", self.format, format, startptr)
 				else:
 					type = format[ptr]
+					
 				content = None
 				ptr += 1
+
+				# Get the number of actual elements in this token, or None if indeterminate (reference)
+				directcount = _STRUCTURE_CHARACTERS[type][2]
+				if directcount is None:
+					elements = 0
+				elif directcount:
+					elements = None if isinstance(count, _Reference) else count
+				else:
+					elements = 1
 			if count != 1 and type in _NO_MULTIPLE:
 				raise FormatError("'" + type + "' elements should not be multiple", self.format, format, startptr)
 			if ptr < len(format) and type in _END_STRUCTURE:
-				raise FormatError("'" + type + "' terminate the structure, there should be nothing else after them", self.format, format, startptr)
+				raise FormatError("'" + type + "' terminates the structure, there should be nothing else afterwards", self.format, format, startptr)
 			token = _Token(count, type, content)
 			tokens.append(token)
+			
+			if elements is None:  # Uncountable interruption
+				cut_countable = True
+				last_countable = 0
+			else:  # Add to the other countable elements
+				last_countable += elements
+				if not cut_countable:
+					first_countable += elements
+				
 		return tokens
 	
 	def pprint(self, tokens=None):
@@ -313,7 +362,7 @@ class Struct (object):
 	def pack(self, *data, refdata=()):
 		data = list(data)
 		
-		if hasattr(data[-1], "write") and hasattr(data, "seek"):  # Into file-like object
+		if len(data) > 0 and hasattr(data[-1], "write") and hasattr(data, "seek"):  # Into file-like object
 			out = data.pop(-1)
 			self._pack_file(out, data, refdata)
 		else:
@@ -374,7 +423,7 @@ class Struct (object):
 			elif token.type == "|":
 				alignref = size
 			else:
-				elementsize = _STRUCTURE_CHARACTERS[token.type]
+				elementsize, referencable, directcount = _STRUCTURE_CHARACTERS[token.type]
 				if elementsize is None:
 					raise FormatError("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format)
 				elif elementsize == -1:
@@ -396,18 +445,20 @@ class Struct (object):
 	def _resolve_count(self, count, unpacked, refdata):
 		if isinstance(count, _Reference):
 			try:
-				if count.type == 1:  # Relative
-					value = unpacked[-count.value]
-				elif count.type == 2:  # Absolute
-					value = unpacked[count.value]
-				elif count.type == 3:  # External
-					value = refdata[count.value]
-				
-				if not isinstance(value, int):
-					raise OperationError("Count from " + _Reference.REFERENCE_TYPES[count.type] + " reference index " + str(count.value) + " is not an integer", self.format)
+				try:
+					if count.type == 1:  # Relative
+						value = unpacked[-count.value]
+					elif count.type == 2:  # Absolute
+						value = unpacked[count.value]
+					elif count.type == 3:  # External
+						value = refdata[count.value]
+					value = value.__index__()
+				except AttributeError as exc:
+					raise TypeError("Count from " + _Reference._REFERENCE_TYPE_NAMES[count.type] + " reference index " + str(count.value) + " must be an integer")
+
 				return value
-			except IndexError:
-				raise OperationError("Bad " + _Reference.REFERENCE_TYPES[count.type] + "reference value : " + str(count.value), self.format)
+			except IndexError as exc:
+				raise ResolutionError("Invalid " + _Reference._REFERENCE_TYPE_NAMES[count.type] + " reference index : " + str(count.value), self.format) from exc
 		else:
 			return count
 	
@@ -564,7 +615,7 @@ class Struct (object):
 					elementdata = self._read(data, count)
 					unpacked.append(elementdata.hex())
 			except IndexError:
-				raise OperationError("No data remaining to read element '" + token.type + "'", self.format)
+				raise DataError("No data remaining to read element '" + token.type + "'", self.format)
 		
 		return unpacked
 	
@@ -635,14 +686,15 @@ class Struct (object):
 					out.write(string)
 					position += 1
 				elif token.type == "n":
-					string = self._encode_string(data[position])
-					out.write(string + b"\x00")
-					position += 1
+					for _ in range(count):
+						string = self._encode_string(data[position])
+						out.write(string + b"\x00")
+						position += 1
 				elif token.type == "X":
 					out.write(bytes.fromhex(data[position]))
 					position += 1
 			except IndexError:
-				raise OperationError("No data remaining to pack into element '" + token.type + "'", self.format)
+				raise DataError("No data remaining to pack into element '" + token.type + "'", self.format)
 		return position
 	
 	def _encode_string(self, data):
@@ -989,32 +1041,6 @@ class TypeWriter (TypeUser):
 		padding = alignment - (length % alignment or alignment)
 		return b'\x00' * padding
 
-
-class StructurePack (object):
-	def __init__(self, **structs):
-		self.structs = {}
-		for name, struct in structs.items():
-			if not isinstance(struct, Struct):
-				struct = Struct(struct)
-			self.structs[name] = struct
-	
-	def asbyteorder(self, byteorder, force=False):
-		if byteorder in ENDIANNAMES:
-			byteorder = ENDIANNAMES[byteorder]
-		newpack = self.copy()
-		for name, struct in newpack.structs.items():
-			if (struct.forcebyteorder and force) or not struct.forcebyteorder:
-				struct.setbyteorder(byteorder)
-		return newpack
-	
-	def copy(self):
-		newpack = StructurePack()
-		for name, struct in self.structs.items():
-			newpack.structs[name] = Struct(struct)
-		return newpack
-	
-	def __getattr__(self, attr):
-		return self.structs[attr]
 
 def unpack(structure, data, names=None, refdata=()):
 	stct = Struct(structure)

@@ -191,7 +191,7 @@ Trying to compute the size of a structure that includes any of those elements wi
 ### Struct
 
 ```python
-Struct(format, names=None)
+Struct(format, names=None, safe_references=True)
 ```
 
 Struct objects allow to pre-parse format strings once and for all.
@@ -199,7 +199,7 @@ Indeed, using only format strings will force to parse them every time you use th
 If a structure is used more than once, it will thus save time to wrap it in a Struct object.
 You can also set the element names once, they will then be used by default every time you unpack data with that structure.
 Any function that accepts a format string also accepts Struct objects.
-A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple.
+A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple. The `safe_references`, when set to `False`, allows some seemingly unsafe but sometimes desirable behaviours described in the *References* section.
 It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
 For convenience, Struct also defines the module-level functions, for the structure it represents (without the `structure` argument as it is for the represented structure) :
 
@@ -234,10 +234,16 @@ Note that if the added structures have different byte order marks, the resulting
 
 ### Exceptions
 
-Rawutil defines two types of exception :
+Rawutil defines several exception types :
 
-- `FormatError` : Raised when the format string parsing fails, or if the structure is invalid
-- `OperationError` : Raised when data fails to be read or written
+- `rawutil.FormatError` : Raised when the format string parsing fails, or if the structure is invalid
+- `rawutil.OperationError` : Raised when operations on data fail
+	- `rawutil.DataError` : Raised when data is at fault (e.g. when there is not enough data to unpack the entire format)
+
+
+It also uses a few others :
+
+- `OverflowError` : When the data is out of range for its format
 
 ## Format strings
 
@@ -252,7 +258,7 @@ Those are the same as in `struct`, except `@` that is equivalent to `=` instead 
 | ---- | ----------- |
 | =    | System byte order (as defined by sys.byteorder) |
 | @    | Equivalent to =, system byte order |
-| >    | Big endian (most significant byte last) |
+| >    | Big endian (most significant byte first) |
 | <    | Little endian (least significant byte first) |
 | !    | Network byte order (big endian as defined by RFC 1700 |
 
@@ -282,7 +288,7 @@ There are several format characters, that define various data types. Simple data
 | d    | double | 8    | IEEE 754 double-precision floating-point number |
 | F    | quad   | 16   | IEEE 754 quadruple-precision floating-point number |
 | c    | char   | 1    | Character (returned as a 1-byte bytes object) |
-| x    | void   | 1    | Padding byte. Takes no data to pack (it simply inserts a null byte) nor returns anything. |
+| x    | void   | 1    | Convenience padding byte. Takes no data to pack (it simply inserts a null byte) nor returns anything. **Does not fail** when there is no more data to read. To fail in that case, just use a normal `c` |
 
 A number before a simple format character may be added to indicate a repetition : `"4I"` means four 32-bits unsigned integers, and is equivalent to `"IIII"`.
 
@@ -325,8 +331,9 @@ In the case above, it is equivalent to have `"3B 6s"` as the structure — but w
 ### Absolute references
 
 Absolute references allow to use a value previously read as a repeat count for another element further in the structure.
-Those are denoted with `/n`, with the index of the referenced element in the structure as `n`.
+Those are denoted with `/N`, with the index of the referenced element in the structure as `N`.
 For example, in the structure `"I /0s"`, the integer is used to tell the length of the string, and the reference allows to read the string with that length.
+For absolute and relative references, a sub-structure counts for 1 element.
 
 Example :
 ```python
@@ -338,7 +345,7 @@ Example :
 
 Relative references are similar to absolute references, except that they are relative to their location in the structure.
 They are denoted with `/pN`, where `N` is the number of elements to go back in the structure to find the referenced element.
-For example, `/p1` gives the immediately previous element, `/p2` the one before, and so on.
+It works a bit like negative list indices in Python : `/p1` gives the immediately previous element, `/p2` the one before, and so on.
 
 Example :
 ```python
@@ -348,10 +355,23 @@ Example :
 
 This is especially useful in cases where there are a variable amount of elements before the referenced element, when the absolute references are unpractical — or when the structure is very long and absolute references become less practical.
 
+### Reference error checking
+
+References come with some error checking : errors are caught while parsing the format when possible. For instance, a reference that points to itself, an element beyond itself, or before the beginning of the format is invalid. Those errors raise a `FormatError`. However, even though it is quite unsafe to reference an element inside or beyond a part with an indeterminate amount of elements (typically, another reference), but that might be useful sometimes. Those "unsafe behaviours" are disabled by default : you need to use `Struct()` with argument `safe_references=False` to activate them.
+
+```python
+>>> # For instance, here we reference the last element of the first block, that itself uses a reference
+>>> unpack("B /0B /p1c", b"\x02\xFF\x03ABC")
+...
+rawutil.FormatError: In format 'B /0B /p1c', in subformat 'B/0B/p1c', at position 4 : Unsafe reference index : relative reference references in or beyond an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor
+>>> Struct("B /0B /p1c", safe_references=False).unpack(b"\x02\xFF\x03ABC")
+[2, 255, 3, b'A', b'B', b'C']
+```
+
 ## Sub-structures
 
 The other big addition in rawutil is the substructures elements.
-Those can be used to isolate values in their own group instead of diluted in the global scope, or to easily read several times a same group of structure elements.
+Those can be used to isolate values in their own group instead of diluted in the global scope, or to easily read several times a similar group of structure elements. They can of course be nested.
 
 Note that a substructure always count as a single element towards references, and that references are local to their group : a `/0` reference inside of a substructure will point to the first element *of that substructure*.
 
@@ -359,7 +379,7 @@ Alignments are also local to their substructure, thus will always align relative
 
 ### Groups
 
-A group is simply a group of values isolated in their own list.
+A group is simply a group of values isolated in their own sub-list.
 Those are defined between parentheses `(…)`.
 The values in a group are then extracted in a sub-list, and must be in a sub-list when packed.
 

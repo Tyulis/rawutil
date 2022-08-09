@@ -1,0 +1,6 @@
+rawutil.egg-info/
+dist/
+build/
+.pypirc
+__pycache__/
+test_old.py
