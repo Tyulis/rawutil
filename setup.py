@@ -5,12 +5,12 @@ from setuptools import setup
 
 here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(here, "README.md"), 'r', encoding="utf-8") as readme:
-	longdesc = readme.read()  #Good joke.
+	longdesc = readme.read()  # Nice.
 
 
 setup(
 	name="rawutil",
-	version="2.6.0",
+	version="2.7.1",
 	description="A pure-python module to read and write binary data",
 	long_description = longdesc,
 	long_description_content_type="text/markdown",
@@ -30,6 +30,8 @@ setup(
 		"Programming Language :: Python :: 3.6",
 		"Programming Language :: Python :: 3.7",
 		"Programming Language :: Python :: 3.8",
+		"Programming Language :: Python :: 3.9",
+		"Programming Language :: Python :: 3.10",
 		"Topic :: Utilities",
 		"Operating System :: OS Independent",
 	],

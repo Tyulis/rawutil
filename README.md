@@ -25,6 +25,7 @@ It does not have any non-builtin dependency.
 - New format characters, to handle padding, alignment, strings, ...
 - Internal references in structures
 - Loops in structures
+- New features to handle variable byte order
 
 ## Usage
 
@@ -190,13 +191,15 @@ Trying to compute the size of a structure that includes any of those elements wi
 ### Struct
 
 ```python
-Struct(format)
+Struct(format, names=None)
 ```
 
-Struct objects allow to pre-parse format strings once and for all. 
+Struct objects allow to pre-parse format strings once and for all.
 Indeed, using only format strings will force to parse them every time you use them.
 If a structure is used more than once, it will thus save time to wrap it in a Struct object.
 Any function that accepts a format string also accepts Struct objects.
+A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple.
+It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
 For convenience, Struct also defines the module-level functions, for the structure it represents (without the `structure` argument as it is for the represented structure) :
 
 ```python
@@ -209,7 +212,8 @@ pack_file(self, file, *data, position=None, refdata=())
 calcsize(self, refdata=None, tokens=None)
 ```
 
-You can retrieve the byte order with the `byteorder` attribute (can be `"little"` or `"big"`), and the format string with the `format` attribute.
+You can retrieve the byte order with the `byteorder` attribute (can be `"little"` or `"big"`), and the format string (without byte order mark) with the `format` attribute.
+You can also tell whether the structure has an assigned byte order with the `forcebyteorder` attribute.
 
 It is also possible to add structures (it can add Struct and format strings transparently), and multiply a Struct object :
 
@@ -227,7 +231,40 @@ External references are fixed too, and supposed to be in sequence in `refdata`.
 
 Note that if the added structures have different byte order marks, the resulting structure will always retain the byte order of the left operand.
 
-### Exception
+### StructurePack
+
+```python
+StructurePack(**structs)
+```
+
+A StructurePack allows to handle and use groups of structures, especially regarding byte order. It is initialized that way (the structures may be anything that is accepted as a structure) :
+
+```python
+pack = StructurePack(
+	struct1 = Struct(">6s2H"),
+	struct2 = "3I /2s",
+	struct3 = Struct("2I4x", ("size", "offset"))
+)
+```
+
+You can then access the structures by their name :
+
+```python
+>>> pack.struct1.unpack(b"foobar\x00\x00\x00\x01")
+[b"foobar", 0, 1]
+```
+
+StructurePack defines the methods `copy`, that simply copies it (and all of its structures), and `asbyteorder` :
+
+```python
+asbyteorder(byteorder, force=False)
+```
+
+`byteorder` is the new byte order, that may be `"little"`, `"big"`, or any format string byte order mark.
+You can use the `force` argument to tell whether the structures with a defined byteorder must have their byte order changed.
+In the example above, by default (`force = False`) only `struct2` and `struct3` will have their byte order set, but with `force=True`, struct1 will too.
+
+### Exceptions
 
 Rawutil defines two types of exception :
 
