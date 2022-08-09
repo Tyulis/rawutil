@@ -197,6 +197,7 @@ Struct(format, names=None)
 Struct objects allow to pre-parse format strings once and for all.
 Indeed, using only format strings will force to parse them every time you use them.
 If a structure is used more than once, it will thus save time to wrap it in a Struct object.
+You can also set the element names once, they will then be used by default every time you unpack data with that structure.
 Any function that accepts a format string also accepts Struct objects.
 A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple.
 It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
@@ -231,39 +232,6 @@ External references are fixed too, and supposed to be in sequence in `refdata`.
 
 Note that if the added structures have different byte order marks, the resulting structure will always retain the byte order of the left operand.
 
-### StructurePack
-
-```python
-StructurePack(**structs)
-```
-
-A StructurePack allows to handle and use groups of structures, especially regarding byte order. It is initialized that way (the structures may be anything that is accepted as a structure) :
-
-```python
-pack = StructurePack(
-	struct1 = Struct(">6s2H"),
-	struct2 = "3I /2s",
-	struct3 = Struct("2I4x", ("size", "offset"))
-)
-```
-
-You can then access the structures by their name :
-
-```python
->>> pack.struct1.unpack(b"foobar\x00\x00\x00\x01")
-[b"foobar", 0, 1]
-```
-
-StructurePack defines the methods `copy`, that simply copies it (and all of its structures), and `asbyteorder` :
-
-```python
-asbyteorder(byteorder, force=False)
-```
-
-`byteorder` is the new byte order, that may be `"little"`, `"big"`, or any format string byte order mark.
-You can use the `force` argument to tell whether the structures with a defined byteorder must have their byte order changed.
-In the example above, by default (`force = False`) only `struct2` and `struct3` will have their byte order set, but with `force=True`, struct1 will too.
-
 ### Exceptions
 
 Rawutil defines two types of exception :
@@ -285,7 +253,7 @@ Those are the same as in `struct`, except `@` that is equivalent to `=` instead 
 | =    | System byte order (as defined by sys.byteorder) |
 | @    | Equivalent to =, system byte order |
 | >    | Big endian (most significant byte last) |
-| <    | Little endian (most significant byte first) |
+| <    | Little endian (least significant byte first) |
 | !    | Network byte order (big endian as defined by RFC 1700 |
 
 If no byte order is defined in a structure, it is set to system byte order by default.

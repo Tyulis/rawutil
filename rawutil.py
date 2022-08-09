@@ -629,12 +629,14 @@ class Struct (object):
 					out.write(elementdata)
 					position += count
 				elif token.type == "s":
-					if len(data[position]) != count:
+					string = self._encode_string(data[position])
+					if len(string) != count:
 						raise OperationError("Length of structure element 's' (" + str(count) + " and data '" + repr(data[position]) + "' do not match", self.format)
-					out.write(data[position])
+					out.write(string)
 					position += 1
 				elif token.type == "n":
-					out.write(data[position] + b"\x00")
+					string = self._encode_string(data[position])
+					out.write(string + b"\x00")
 					position += 1
 				elif token.type == "X":
 					out.write(bytes.fromhex(data[position]))
@@ -642,6 +644,13 @@ class Struct (object):
 			except IndexError:
 				raise OperationError("No data remaining to pack into element '" + token.type + "'", self.format)
 		return position
+	
+	def _encode_string(self, data):
+		try:
+			string = data.encode("utf-8")
+		except (AttributeError, UnicodeDecodeError):
+			string = data
+		return string
 	
 	def _count_to_format(self, count):
 		if count == 1:
