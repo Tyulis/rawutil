@@ -4,6 +4,7 @@ import math
 import unittest
 import rawutil
 import functools
+import timeit
 from collections import namedtuple
 
 
@@ -685,3 +686,54 @@ class StructureTestCase (unittest.TestCase):
 		with self.assertRaises(rawutil.FormatError):
 			multiplied = rawutil.Struct("B /0B") * 5
 
+
+def run_timings():
+	time_parsing()
+	time_unpack_bytes()
+	time_unpack_filelike()
+	time_pack_bytes()
+	time_pack_filelike()
+
+def time_parsing():
+	number = 200000
+	format = "<bB hH 'random comment' 5U6u /0Ii/p1l LLLLLLLL (QQ) 5(qq) /0(5e|1e 4a) Q/p1[fdF16a] {5I 1989F /0n /1s /2c /3[6X 4x]}"
+	duration = timeit.timeit(stmt="rawutil.Struct(format)", globals=globals() | locals(), number=number)
+	print("Parsing %d times : %.4f seconds" % (number, duration))
+
+def time_unpack_bytes():
+	number = 500000
+	structure = rawutil.Struct("<4s I/1(n) B/p1[#4X |B/p1B 4a] $")
+	refdata = (100, 100, 100, 100, 6)
+	packed = b"TEST\x06\x00\x00\x00spam\x00ham\x00eggs\x00foo\x00bar\x00space \x00\x03\xDD\xDD\xDD\xDD\xDD\xDD\x04\xFF\xFF\xFF\xFF\x00\x00\x00\xEE\xEE\xEE\xEE\xEE\xEE\x01\xFF\x00\x00\xCC\xCC\xCC\xCC\xCC\xCC\x05\xAA\xAA\xAA\xAA\xAA\x00\x00 TEST TEST TEST"
+	duration = timeit.timeit(stmt="structure.unpack(packed, refdata=refdata)", globals=globals() | locals(), number=number)
+	print("Unpacking bytes %d times : %.4f seconds" % (number, duration))
+
+def time_unpack_filelike():
+	number = 500000
+	structure = rawutil.Struct("<4s I/1(n) B/p1[#4X |B/p1B 4a]")
+	refdata = (100, 100, 100, 100, 6)
+	packed = b"TEST\x06\x00\x00\x00spam\x00ham\x00eggs\x00foo\x00bar\x00space \x00\x03\xDD\xDD\xDD\xDD\xDD\xDD\x04\xFF\xFF\xFF\xFF\x00\x00\x00\xEE\xEE\xEE\xEE\xEE\xEE\x01\xFF\x00\x00\xCC\xCC\xCC\xCC\xCC\xCC\x05\xAA\xAA\xAA\xAA\xAA\x00\x00"
+	filelike_in=io.BytesIO(packed*number)
+	duration = timeit.timeit(stmt="structure.unpack(filelike_in, refdata=refdata)", globals=globals() | locals(), number=number)
+	print("Unpacking file-like %d times : %.4f seconds" % (number, duration))
+
+def time_pack_bytes():
+	number = 500000
+	structure = rawutil.Struct("<4s I/1(n) B/p1[#4X |B/p1B 4a]")
+	refdata = (100, 100, 100, 100, 6)
+	unpacked = [b"TEST", 6, [b"spam", b"ham", b"eggs", b"foo", b"bar", b"space "], 3, [["DDDDDDDDDDDD", 4, 0xFF, 0xFF, 0xFF, 0xFF], ["EEEEEEEEEEEE", 1, 0xFF], ["CCCCCCCCCCCC", 5, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA]]]
+	duration = timeit.timeit(stmt="structure.pack(*unpacked, refdata=refdata)", globals=globals() | locals(), number=number)
+	print("Packing bytes %d times : %.4f seconds" % (number, duration))
+
+def time_pack_filelike():
+	number = 500000
+	structure = rawutil.Struct("<4s I/1(n) B/p1[#4X |B/p1B 4a]")
+	refdata = (100, 100, 100, 100, 6)
+	unpacked = [b"TEST", 6, [b"spam", b"ham", b"eggs", b"foo", b"bar", b"space "], 3, [["DDDDDDDDDDDD", 4, 0xFF, 0xFF, 0xFF, 0xFF], ["EEEEEEEEEEEE", 1, 0xFF], ["CCCCCCCCCCCC", 5, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA]]]
+	filelike_out = io.BytesIO()
+	duration = timeit.timeit(stmt="structure.pack_file(filelike_out, *unpacked, refdata=refdata)", globals=globals() | locals(), number=number)
+	print("Packing file-like %d times : %.4f seconds" % (number, duration))
+
+if __name__ == "__main__":
+	run_timings()
+	unittest.main()

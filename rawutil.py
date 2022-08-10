@@ -10,7 +10,7 @@ import builtins
 import binascii
 import collections
 
-__version__ = "2.7.2"
+__version__ = "2.7.3"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
