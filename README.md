@@ -57,14 +57,14 @@ RawutilNameSpace(string=b'ABCD', num1=16, num2=32)
 ### unpack_from
 
 ```python
-unpack_from(structure, data, position=None, names=None, refdata=(), getptr=False)
+unpack_from(structure, data, offset=None, names=None, refdata=(), getptr=False)
 ```
 
 Unpacks the given `data` according to the `structure` starting from the given `position`, and returns the unpacked values as a list
 
 This function works exactly like `unpack`, with two more optional arguments :
 
-- `position` can be used to specify a starting position to read. In a file-like object, the cursor is moved to the given `position`, then the data to unpack is read and the cursor is left at the end of the data that has been read. If this parameter is not set, it works like `unpack` and reads from the current position
+- `offset` can be used to specify a starting position to read. In a file-like object, the cursor is moved to the given absolute `offset`, then the data to unpack is read and the cursor is left at the end of the data that has been read. If this parameter is not set, it works like `unpack` and reads from the current position
 - `getptr` can be set to True to return the final position in the data, after the unpacked data. The function will then return `(values, end_position)`. If left to False, it works like `unpack` and only returns the values.
 
 Examples :
@@ -72,7 +72,7 @@ Examples :
 ```python
 >>> unpack_from("<4s #0I", b"ABCD\x10\x00\x00\x00\x20\x00\x00\x00", names=("string", "num1", "num2"), refdata=(2, ))
 RawutilNameSpace(string=b'ABCD', num1=16, num2=32)
->>> values, endpos = unpack_from("<2I", b"ABCD\x10\x00\x00\x00\x20\x00\x00\x00EFGH", 4, getptr=True)
+>>> values, endpos = unpack_from("<2I", b"ABCD\x10\x00\x00\x00\x20\x00\x00\x00EFGH", offset=4, getptr=True)
 >>> values
 [16, 32]
 >>> endpos

@@ -157,6 +157,7 @@ _STRUCTURE_CHARACTERS = {  # (size in bytes or None if indeterminate, referencab
 	"d": (8, False, True), "F": (16, False, True), "c": (1, False, True), "s": (1, False, False),
 	"n": (None, False, True), "X": (1, False, False), "|": (0, False, None), "a": (-1, False, False),
 	"x": (1, False, True), "$": (None, False, False),
+	"(": (None, False, False), "[": (None, False, False), "{": (None, False, False),
 }
 
 class Struct (object):
@@ -654,9 +655,12 @@ class Struct (object):
 				elif token.type in _INTEGER_ELEMENTS:
 					signed, size = _INTEGER_ELEMENTS[token.type]
 					elementdata = b""
-					for _ in range(count):
-						elementdata += data[position].to_bytes(size, byteorder=self.byteorder, signed=signed)
-						position += 1
+					try:
+						for _ in range(count):
+							elementdata += data[position].to_bytes(size, byteorder=self.byteorder, signed=signed)
+							position += 1
+					except AttributeError as exc:
+						raise TypeError("Wrong type for format %s, the given object must be an integer or have a .to_bytes() method similar to int" % token.type)
 					out.write(elementdata)
 				elif token.type in _FLOAT_ELEMENTS:
 					size, exponentsize, mantissasize, bias = _FLOAT_ELEMENTS[token.type]
@@ -751,19 +755,22 @@ class Struct (object):
 	def _add_structs(self, lefttokens, righttokens):
 		leftsize = len(lefttokens)
 		leftexternals = self._max_external_reference(lefttokens) + 1 
-					
+		right_has_references = any(isinstance(token.count, _Reference) and token.count.type == _Reference.Absolute for token in righttokens)
+		
 		outtokens = []
 		for token in lefttokens:
 			if token.type in ("{", "$"):
 				raise FormatError("'" + token.type + ("}" if token.type == "{" else "") + "' forces the end of the structure, you can’t add or multiply structures if it causes those elements to be in the middle of the resulting structure")
+			elif right_has_references and isinstance(token.count, _Reference) and _STRUCTURE_CHARACTERS[token.type][2]:
+				raise FormatError("The left operand has an indeterminate amount of elements, impossible to fix right side absolute references")
 			outtokens.append(token.copy())
 			
 		for token in righttokens:
 			newtoken = token.copy()
 			if isinstance(newtoken.count, _Reference):
-				if newtoken.count.type == 2:  # absolute
+				if newtoken.count.type == _Reference.Absolute:
 					newtoken.count.value += leftsize
-				elif newtoken.count.type == 3:  # external
+				elif newtoken.count.type == _Reference.External:
 					newtoken.count.value += leftexternals
 			if newtoken.content is not None:
 				self._fix_external_references(newtoken.content, leftexternals)
@@ -774,6 +781,9 @@ class Struct (object):
 	def _multiply_struct(self, tokens, num):
 		blocksize = len(tokens)
 		blockexternals = self._max_external_reference(tokens) + 1
+		has_indeterminate = any(isinstance(token.count, _Reference) and token.count.type == _Reference.Absolute and _STRUCTURE_CHARACTERS[token.type][2] for token in tokens)
+		if num > 1 and has_indeterminate:
+			raise FormatError("The multiplied structure contains an indeterminate amount of elements, impossible to fix absolute references")
 		
 		size = 0
 		externals = 0
@@ -816,7 +826,7 @@ class Struct (object):
 		
 		self.tokens = newtokens
 		self.format = newformat
-		return newstruct
+		return self
 	
 	def __radd__(self, stct):
 		if not isinstance(stct, Struct):
@@ -831,6 +841,11 @@ class Struct (object):
 		return newstruct
 	
 	def __mul__(self, n):
+		if n == 0:
+			return Struct("")
+		elif n == 1:
+			return Struct(self)
+		
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
 		
 		newstruct = Struct()
@@ -841,17 +856,25 @@ class Struct (object):
 		return newstruct
 	
 	def __imul__(self, n):
-		newtokens, newformat = self._multiply_struct(self.tokens, n)
-		self.tokens = newtokens
-		self.format = newformat
+		if n == 0:
+			self.format = ""
+			self.tokens = []
+		elif n > 1:
+			newtokens, newformat = self._multiply_struct(self.tokens, n)
+			self.tokens = newtokens
+			self.format = newformat
 		return self
 
 	def __rmul__(self, n):
+		if n == 0:
+			return Struct("")
+		elif n == 1:
+			return Struct(self)
+			
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
-		
 		newstruct = Struct()
-		if stct.forcebyteorder:
-			newstruct.setbyteorder(stct.byteorder)
+		if self.forcebyteorder:
+			newstruct.setbyteorder(self.byteorder)
 		newstruct.tokens = newtokens
 		newstruct.format = newformat
 		return newstruct

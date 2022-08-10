@@ -1,7 +1,10 @@
+import io
 import sys
 import math
 import unittest
 import rawutil
+import functools
+from collections import namedtuple
 
 
 class StructureTestCase (unittest.TestCase):
@@ -105,7 +108,7 @@ class StructureTestCase (unittest.TestCase):
 	def test_simple_bothways(self):
 		for structure, cases in self.simple_bothways.items():
 			for unpacked, packed in cases:
-				with self.subTest(structure=structure, unpacked=unpacked, packed=packed):
+				with self.subTest(part="bytes", structure=structure, unpacked=unpacked, packed=packed):
 					if isinstance(packed, type):
 						with self.assertRaises(packed):
 							rawutil.pack(structure, unpacked)
@@ -114,7 +117,26 @@ class StructureTestCase (unittest.TestCase):
 							rawutil.unpack(structure, packed)
 					else:
 						self.assertEqual(rawutil.unpack(structure, packed)[0], unpacked)
+						self.assertEqual(rawutil.unpack_from(structure, b"\xFF\xFF" + packed, offset=2, getptr=True), ([unpacked], len(packed) + 2))
 						self.assertEqual(rawutil.pack(structure, unpacked), packed)
+				
+				with self.subTest(part="file-like", structure=structure, unpacked=unpacked, packed=packed):
+					if isinstance(packed, type):
+						filelike_out = io.BytesIO()
+						with self.assertRaises(packed):
+							rawutil.pack_file(structure, filelike_out, unpacked)
+					elif isinstance(unpacked, type):
+						filelike_in = io.BytesIO(packed)
+						with self.assertRaises(unpacked):
+							rawutil.unpack(structure, filelike_in)
+					else:
+						filelike_out = io.BytesIO()
+						filelike_in = io.BytesIO(packed)
+						self.assertEqual(rawutil.unpack(structure, filelike_in)[0], unpacked)
+						filelike_in.seek(0)
+						self.assertEqual(rawutil.unpack_from(structure, filelike_in, offset=0, getptr=True), ([unpacked], len(packed)))
+						rawutil.pack_file(structure, filelike_out, unpacked)
+						self.assertEqual(filelike_out.getvalue(), packed)
 	
 	def test_simple_pack(self):
 		for structure, cases in self.simple_pack.items():
@@ -495,3 +517,171 @@ class StructureTestCase (unittest.TestCase):
 		structure = "#0I #1(#2I) #3[#4I]"
 		refdata = [2, 3, 5, 1, 0]
 		self.assertEqual(rawutil.calcsize(structure, refdata=refdata), 68)
+	
+	def test_names(self):
+		format = "B 'val1'  B 'val2'  B 'val3'"
+		returntype = namedtuple("test", "val1 val2 val3")
+		unpacked = returntype(1, 2, 3)
+		packed = b"\x01\x02\x03"
+		for names in ("val1 val2 val3", ("val1", "val2", "val3"), ):
+			with self.subTest(part="direct", names=names):
+				self.assertEqual(rawutil.unpack(format, packed, names=names), unpacked)
+				self.assertEqual(rawutil.unpack_from(format, packed, names=names, offset=0), unpacked)
+				self.assertEqual(rawutil.pack(format, *unpacked), packed)
+			
+			with self.subTest(part="struct", names=names):
+				structure = rawutil.Struct(format)
+				self.assertEqual(structure.unpack(packed, names=names), unpacked)
+				self.assertEqual(structure.unpack_from(packed, names=names, offset=0), unpacked)
+				self.assertEqual(structure.pack(*unpacked), packed)
+			
+			with self.subTest(part="named struct", names=names):
+				structure = rawutil.Struct(format, names=names)
+				self.assertEqual(structure.unpack(packed), unpacked)
+				self.assertEqual(structure.unpack_from(packed, offset=0), unpacked)
+				self.assertEqual(structure.pack(*unpacked), packed)
+	
+	def test_pack_into(self):
+		with self.subTest(part="full"):
+			buffer = bytearray(b"\x00\x00\x00\x00")
+			rawutil.pack_into("<H2B", buffer, 0, 0x7777, 0x66, 0x55)
+			self.assertEqual(buffer, bytearray(b"\x77\x77\x66\x55"))
+		
+		with self.subTest(part="start"):
+			buffer = bytearray(b"\x00\x00\x00\x00\xFF\xFF")
+			rawutil.pack_into("<H2B", buffer, 0, 0x7777, 0x66, 0x55)
+			self.assertEqual(buffer, bytearray(b"\x77\x77\x66\x55\xFF\xFF"))
+			
+		with self.subTest(part="middle"):
+			buffer = bytearray(b"\xFF\x00\x00\x00\x00\xFF")
+			rawutil.pack_into("<H2B", buffer, 1, 0x7777, 0x66, 0x55)
+			self.assertEqual(buffer, bytearray(b"\xFF\x77\x77\x66\x55\xFF"))
+		
+		with self.subTest(part="end"):
+			buffer = bytearray(b"\xFF\xFF\x00\x00\x00\x00")
+			rawutil.pack_into("<H2B", buffer, 2, 0x7777, 0x66, 0x55)
+			self.assertEqual(buffer, bytearray(b"\xFF\xFF\x77\x77\x66\x55"))
+		
+		with self.subTest(part="extend"):
+			buffer = bytearray(b"\xFF\xFF\x00\x00")
+			rawutil.pack_into("<H2B", buffer, 2, 0x7777, 0x66, 0x55)
+			self.assertEqual(buffer, bytearray(b"\xFF\xFF\x77\x77\x66\x55"))
+	
+	def test_iter_unpack(self):
+		structure = "B /0B"
+		unpacked = ([2, 1, 2], [3, 4, 5, 6], [1, 7])
+		packed = b"\x02\x01\x02\x03\x04\x05\x06\x01\x07"
+		for items, correct_items in zip(rawutil.iter_unpack(structure, packed), unpacked):
+			self.assertSequenceEqual(items, correct_items)
+	
+	def test_iter_unpack_error(self):
+		structure = "B /0B"
+		with self.assertRaises(rawutil.DataError):
+			list(rawutil.iter_unpack(structure, b"\x01\x02\x03\x04\x05"))
+		with self.assertRaises(rawutil.DataError):
+			list(rawutil.iter_unpack(structure, b"\x01\x02\x03\x04\x05\x06\x07"))
+	
+	def test_struct_add(self):
+		format1 = "BB (B /0B #0B)"
+		format2 = "BB /p2B /1B (B /0B) #0B #1B"
+		format_total = "B B (B /0B #0B) B B /p2B /4B (B /0B) #1B #2B"
+		packed1 = b"\xFF\xFF\x01\xCC\xEE\xEE\xEE"
+		packed2 = b"\x01\x03\x99\xFF\xFF\xFF\x02\xBB\xBB\xDD\xDD\xDD\xDD\xAA\xAA"
+		packed_total = packed1 + packed2
+		unpacked1 = [0xFF, 0xFF, [1, 0xCC, 0xEE, 0xEE, 0xEE]]
+		unpacked2 = [1, 3, 0x99, 0xFF, 0xFF, 0xFF, [2, 0xBB, 0xBB], 0xDD, 0xDD, 0xDD, 0xDD, 0xAA, 0xAA]
+		unpacked_total = unpacked1 + unpacked2
+		refdata1 = [3]
+		refdata2 = [4, 2]
+		refdata_total = refdata1 + refdata2
+		
+		with self.subTest(part="check separate formats"):
+			self.assertEqual(rawutil.unpack(format1, packed1, refdata=refdata1), unpacked1)
+			self.assertEqual(rawutil.pack(format1, *unpacked1, refdata=refdata1), packed1)
+			self.assertEqual(rawutil.unpack(format2, packed2, refdata=refdata2), unpacked2)
+			self.assertEqual(rawutil.pack(format2, *unpacked2, refdata=refdata2), packed2)
+		
+		with self.subTest(part="concat formats"):
+			structure = format1 + format2
+			with self.assertRaises(rawutil.DataError):  # Here it will get an absurd count and overflow the data
+				rawutil.Struct(structure, safe_references=False).unpack(packed_total, refdata=refdata_total)
+			with self.assertRaises(TypeError):  # Here it will give a group in the place of an int
+				rawutil.Struct(structure, safe_references=False).pack(*unpacked_total, refdata=refdata_total)
+		
+		with self.subTest(part="struct + format"):
+			structure = rawutil.Struct(format1) + format2
+			self.assertEqual(structure.format, format_total)
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="format + struct"):
+			structure = format1 + rawutil.Struct(format2)
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="struct + struct"):
+			structure = rawutil.Struct(format1) + rawutil.Struct(format2)
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="struct += format"):
+			structure = rawutil.Struct(format1)
+			structure += format2
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="struct += struct"):
+			structure = rawutil.Struct(format1)
+			structure += rawutil.Struct(format2)
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+	
+	def test_struct_add_error_indeterminate_internal_reference(self):
+		with self.assertRaises(rawutil.FormatError):
+			added = rawutil.Struct("B /0B") + rawutil.Struct("B /0B")
+	
+	def test_struct_add_error_indeterminate_external_reference(self):
+		with self.assertRaises(rawutil.FormatError):
+			added = rawutil.Struct("B #0B") + rawutil.Struct("B /0B")
+	
+	def test_struct_multiply(self):
+		format = "B /0(B) B /p1(B) (#0B)"
+		packed_all = [b"\x01\xFF\x02\xEE\xEE\xDD\xDD\xDD", b"\x00\x00\xFF\xFF", b"\x02\xFF\xFF\x03\xEE\xEE\xEE"]
+		packed_total = functools.reduce(lambda a, b: a+b, packed_all)
+		unpacked_all = [[1, [0xFF], 2, [0xEE, 0xEE], [0xDD, 0xDD, 0xDD]], [0, [], 0, [], [0xFF, 0xFF]], [2, [0xFF, 0xFF], 3, [0xEE, 0xEE, 0xEE], []]]
+		unpacked_total = functools.reduce(lambda a, b: a+b, unpacked_all)
+		refdata_all = [[3], [2], [0]]
+		refdata_total = functools.reduce(lambda a, b: a+b, refdata_all)
+		
+		with self.subTest(part="check separate formats"):
+			for packed, unpacked, refdata in zip(packed_all, unpacked_all, refdata_all):
+				self.assertEqual(rawutil.unpack(format, packed, refdata=refdata), unpacked)
+				self.assertEqual(rawutil.pack(format, *unpacked, refdata=refdata), packed)
+		
+		with self.subTest(part="multiply format"):
+			structure = format * 3
+			with self.assertRaises(rawutil.DataError):
+				rawutil.unpack(structure, packed_total, refdata=refdata_total)
+			with self.assertRaises(rawutil.DataError):
+				rawutil.pack(structure, *unpacked_total, refdata=refdata_total)
+			
+		with self.subTest(part="struct * int"):
+			structure = rawutil.Struct(format) * 3
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="int * struct"):
+			structure = 3 * rawutil.Struct(format)
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+		with self.subTest(part="struct *= int"):
+			structure = rawutil.Struct(format)
+			structure *= 3
+			self.assertEqual(structure.unpack(packed_total, refdata=refdata_total), unpacked_total)
+			self.assertEqual(structure.pack(*unpacked_total, refdata=refdata_total), packed_total)
+		
+	def test_struct_multiply_error_indeterminate_internal_reference(self):
+		with self.assertRaises(rawutil.FormatError):
+			multiplied = rawutil.Struct("B /0B") * 5
+

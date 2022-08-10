@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 # -*- coding:utf-8 -*-
 import os
+import rawutil
 from setuptools import setup
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -10,7 +11,7 @@ with open(os.path.join(here, "README.md"), 'r', encoding="utf-8") as readme:
 
 setup(
 	name="rawutil",
-	version="2.7.1",
+	version=rawutil.__version__,
 	description="A pure-python module to read and write binary data",
 	long_description = longdesc,
 	long_description_content_type="text/markdown",
