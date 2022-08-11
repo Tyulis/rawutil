@@ -40,7 +40,7 @@ Unpacks the given `data` according to the `structure`, and returns the unpacked 
 
 - `structure` is the structure of the data to unpack, as a format string or a `Struct` object
 - `data` may be a bytes-like or a file-like object. If it is a file-like object, the data will be unpacked starting from the current position in the file, and will leave the cursor at the end of the data that has been read (effectively reading the data to unpack from the file).
-- `names` may be a list of field names, or a `namedtuple`. If it is defined, the values will then be returned in a `namedtuple` with the given names or definition.
+- `names` may be a list of field names for a `namedtuple`, or a callable that takes all unpacked elements in order as arguments, like a `namedtuple` or a `dataclass`.
 - `refdata` may be used to easily input external data into the structure, as `#n` references. This will be described in the References part below
 
 Unlike `struct`, this function does not raises any error if the data is larger than the structure expected size.
@@ -317,7 +317,7 @@ There are 3 types of references.
 ### External references
 
 An external reference is a reference to a value given at run-time — namely through the `refdata` argument of all rawutil functions
-In the format string, those are denoted by a `#n` element, with the index in `refdata` as `n`. 
+In the format string, those are denoted by a `#n` element, with the index in `refdata` as `n`.
 For example, in the structure `"#0B #1s"`, `#0` will be replaced by the element 0 of `refdata`, and `#1` by the element 1.
 
 Example :

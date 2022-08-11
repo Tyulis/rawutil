@@ -1,6 +1,93 @@
 # -*- coding:utf-8 -*-
-# rawutil.py
-# A single-file, pure-python module to manage binary data
+# MIT License
+#
+# Copyright (c) 2017-2022 Tyulis
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""rawutil, a lightweight Python module to make complex binary structures easy
+
+This module aims at providing means to interact with structured binary data in a
+similary way to the standard module `struct`, but with way more features
+
+FORMAT STRINGS REFERENCE :
+- Byte-order marks : must be the first character, indicates the byte-order
+					 to use with that structure
+	- `<` : little-endian (least significant byte first)
+	- `>` : big-endian (most significant byte first)
+	- `=` : system byte order
+	- `@` : also system byte order (no system alignments contrary to struct)
+	- `!` : network byte order (big endian)
+- Format characters : denote some data to process, like `struct`
+	- `?` : 8-bits boolean (any non-zero value is True, True is packed as 0x01)
+	- `b` : signed 8-bits integer
+	- `B` : unsigned 8-bits integer
+	- `h` : signed 16-bits integer
+	- `H` : unsigned 16-bits integer
+	- `u` : signed 24-bits integer
+	- `U` : unsigned 24-bits integer
+	- `i`, `l` : signed 32-bits integer
+	- `I`, `L` : unsigned 32-bits integer
+	- `q` : signed 64-bits integer
+	- `Q` : unsigned 64-bits integer
+	- `e` : half-precision IEEE754 floating-point number (16-bits)
+	- `f` : single-precision IEEE754 floating-point number (32-bits)
+	- `d` : double-precision IEEE754 floating-point number (64-bits)
+	- `F` : quadruple-precision IEEE754 floating-point number (128-bits)
+	- `c` : single character (as a 1-byte `bytes` object)
+	- `s` : string (length is given by the count, for instance `16s` is a
+			16-bytes string), as a `bytes` object
+	- `n` : null-terminated string (stops at the first null byte, null byte is
+			not included). The count gives a number of strings, not the length
+	- `X` : hexadecimal string, works like `s` but converts to hex
+	- `x` : padding byte, packed as 0x00, not included in the unpacked data
+	- `a` : alignment, pads with null bytes until the next multiple of the count
+	- `|` : alignment reference, `a` formats align according to the beginning of
+			the format or the previous `|` character
+	- `$` : consumes all remaining data as a bytes object
+- Counts : give an amount of successive elements of the same type, or sometimes
+		   a length (e.g. 4I = IIII = 4 uint32, 16s = 16-bytes string)
+	- ``	: no count is always equivalent to 1
+	- `4`   : the count can be given directly as a number
+	- `/1`  : absolute reference, the value of the n-th element of the structure
+			  is used as the count (here if the second element is 3, this makes a
+			  count of 3). Indices start at 0
+	- `/p1` : relative reference, the value of the n-th previous element is used
+			  as the count (e.g. /p1 is the immediately previous element, /p2 2
+			  elements before, etc.). Indices start at 1, like with negative
+			  indices
+	- `#0`  : external reference, the count is given by the element at index n of
+			  the parameter `refdata` given to rawutil functions
+Substructures : extracted in sub-lists, allow to organise better and implement
+				iteration directly in structures. References and alignments are
+				always local to their substructure.
+	- `5(2B i)` : group, the substructure is simply extracted into a sub-list.
+				  If a count is given, it extracts the group n times but in the
+				  same list (ex. `3(I)` makes [1, 2, 3]), this allows to use
+				  references for list lengths (like in `I /0(n)`, this extracts
+				  as much strings as given by the I but in a sub-list)
+	- `5[2B i]` : iterator, the substructure is extracted as much times as given
+				  by the count, each times in a separate sub-list (ex. 3[2I]
+				  can give [[1, 2], [3, 4], [5, 6]])
+	- `{2B i}`  : infinite iterator, works just like `[]` but continues until
+				  there is no more data to read
+"""
 
 import io
 import sys
@@ -10,7 +97,7 @@ import builtins
 import binascii
 import collections
 
-__version__ = "2.7.3"
+__version__ = "2.7.4"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
@@ -56,7 +143,7 @@ class FormatError (Exception):
 		self.format = format
 		self.subformat = subformat
 		self.position = position
-	
+
 	def __str__(self):
 		message = ""
 		if self.format is not None:
@@ -77,7 +164,7 @@ class OperationError (Exception):
 		self.message = message
 		self.format = format
 		self.subformat = subformat
-	
+
 	def __str__(self):
 		message = ""
 		if self.format is not None:
@@ -93,33 +180,38 @@ class DataError (OperationError):
 class ResolutionError (OperationError):
 	pass
 
-	
-	
+
+
 class _Reference (object):
+	__slots__ = ("type", "value")
+
 	Relative = 1
 	Absolute = 2
 	External = 3
-	
+
 	_REFERENCE_TYPE_NAMES = {0: None, Relative: "relative", Absolute: "absolute", External: "external"}
+
 	def __init__(self, type, value):
 		self.type = type
 		self.value = value
-	
+
 	def copy(self):
 		return _Reference(self.type, self.value)
-	
+
 	def __str__(self):
 		return "Ref(" + self._REFERENCE_TYPE_NAMES[self.type] + ", " + str(self.value) + ")"
-	
+
 	def __repr(self):
 		return "_Reference(" + str(self.type) + ", " + str(self.value) + ")"
 
 class _Token (object):
+	__slots__ = ("count", "type", "content")
+
 	def __init__(self, count, type, content):
 		self.count = count
 		self.type = type
 		self.content = content
-	
+
 	def copy(self):
 		if isinstance(self.count, _Reference):
 			count = self.count.copy()
@@ -130,10 +222,10 @@ class _Token (object):
 		else:
 			content = [token.copy() for token in self.content]
 		return _Token(count, self.type, content)
-	
+
 	def __str__(self):
 		return "(" + str(self.count) + ", " + self.type + ")"
-	
+
 	def __repr__(self):
 		return "_Token(" + repr(self.count) + ", '" + self.type + "', " + repr(self.content) + ")"
 
@@ -142,7 +234,7 @@ _GROUP_CHARACTERS = {"(": ")", "[": "]", "{": "}"}
 _NO_MULTIPLE = "{|$"
 _END_STRUCTURE = "{$"
 _INTEGER_ELEMENTS = {  # (signed, size in bytes)
-	"b": (True, 1), "B": (False, 1), "h": (True, 2), "H": (False, 2), 
+	"b": (True, 1), "B": (False, 1), "h": (True, 2), "H": (False, 2),
 	"u": (True, 3), "U": (False, 3), "i": (True, 4), "I": (False, 4),
 	"l": (True, 4), "L": (False, 4), "q": (True, 8), "Q": (False, 8),
 }
@@ -161,7 +253,28 @@ _STRUCTURE_CHARACTERS = {  # (size in bytes or None if indeterminate, referencab
 }
 
 class Struct (object):
-	def __init__(self, format="", names=None, safe_references=True):
+	"""Object that denotes a binary structure
+	A Struct compiles a format once and for all, significantly
+	improving performance for reused structures compared to standalone
+	functions"""
+
+	__slots__ = ("format", "tokens", "byteorder", "names", "forcebyteorder", "safe_references")
+
+	def __init__(self, format="", names=None, *, safe_references=True):
+		"""Setup the structure and compile the format
+
+		- format : can be a format string to compile, or another Struct to copy
+		- names : names for each element of data unpacked by this structure.
+		          This can be a list of names, a string with space-separated
+				  field names, or a callable that takes each field in order as
+				  arguments (for instance a `namedtuple` type or a `dataclass`)
+		Keyword-only arguments :
+		- safe_references : When set to False, allows "unsafe" behaviours, like
+		          referencing an item inside or possibly beyond an indeterminate
+				  amount of elements. Defaults to True (fail when encountering
+				  those circumstances)
+		"""
+
 		self.names = None
 		self.safe_references = safe_references
 		if isinstance(format, Struct):
@@ -174,36 +287,248 @@ class Struct (object):
 			self.format = format
 			self.byteorder = sys.byteorder
 			self.forcebyteorder = False
-			self.parse_struct(format)
+			self._parse_struct(format)
 		else:
 			self.format = format
 			self.byteorder = sys.byteorder
 			self.forcebyteorder = False
 			self.tokens = []
-			
-		if hasattr(names, '_fields') and hasattr(names, '_asdict'):  #trying to recognize a namedtuple
+
+		if hasattr(names, '__call__'):  # Callable, like a namedtuple
 			self.names = names
 		elif names is not None:
 			self.names = collections.namedtuple('RawutilNameSpace', names)
-	
-	def parse_struct(self, format):
-		format = self.preprocess(format)
+
+	def pprint(self, tokens=None):
+		out = ""
+		if tokens is None:
+			tokens = self.tokens
+		for token in tokens:
+			out += str(token) + "\n"
+			if token.content is not None:
+				substruct = self.pprint(token.content)
+				out += "\n".join(["\t" + line for line in substruct.splitlines()]) + "\n"
+		return out
+
+	def setbyteorder(self, byteorder):
+		if byteorder in ENDIANNAMES:
+			byteorder = ENDIANNAMES[byteorder]
+		self.forcebyteorder = True
+		self.byteorder = byteorder
+
+	def unpack(self, data, names=None, refdata=()):
+		"""Unpack data from the given source according to this structure
+
+		- data : any bytes-like or binary readable file-like object, all data
+		        is read from it. If it is a file-like object, reading starts
+				from its current position and leaves it after the data that
+				has been read
+		- names : names for each element of data unpacked by this structure.
+		        This can be a list of names, a string with space-separated
+				field names, or a callable that takes each field in order as
+				arguments (for instance a `namedtuple` type or a `dataclass`)
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[0] as a count)
+		"""
+
+		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
+			unpacked = self._unpack_file(data, self.tokens, refdata)
+		else:  # From bytes-like objet
+			unpacked = self._unpack_file(io.BytesIO(data), self.tokens, refdata)
+
+		if hasattr(names, '__call__'):  #trying to recognize a callable
+			unpacked = names(unpacked)
+		elif names is not None:
+			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+		elif self.names is not None:
+			unpacked = self.names(*unpacked)
+		return unpacked
+
+	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False):
+		"""Unpack data from the given source at the given position
+
+		- data : any bytes-like or binary readable file-like object, all data
+		        is read from it. If it is a file-like object, reading starts
+				from the given absolute position and leaves it after the data
+				that has been read
+		- offset : Absolute position in the data or file to start reading from.
+		        Defaults to 0 for bytes-like objects or the current position for
+				file-like objects
+		- names : names for each element of data unpacked by this structure.
+		        This can be a list of names, a string with space-separated
+				field names, or a callable that takes each field in order as
+				arguments (for instance a `namedtuple` type or a `dataclass`)
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[1] as a count)
+		- getptr : If set to True, also returns the position immediately after
+		        the unpacked data
+		"""
+
+		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
+			if offset is not None:
+				data.seek(offset)
+			unpacked = self._unpack_file(data, self.tokens, refdata)
+		else:  # From bytes-like objet
+			data = io.BytesIO(data)
+			if offset is not None:
+				data.seek(offset)
+			unpacked = self._unpack_file(data, self.tokens, refdata)
+
+		if hasattr(names, '__call__'):  #trying to recognize a callable, like a namedtuple
+			unpacked = names(unpacked)
+		elif names is not None:
+			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+		elif self.names is not None:
+			unpacked = self.names(*unpacked)
+
+		if getptr:
+			return unpacked, data.tell()
+		else:
+			return unpacked
+
+	def pack(self, *data, refdata=()):
+		"""Pack data as bytes according to this structure
+
+		- data : all elements to pack, in order
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[1] as a count)
+		"""
+		data = list(data)
+
+		if len(data) > 0 and hasattr(data[-1], "write") and hasattr(data, "seek"):  # Into file-like object
+			out = data.pop(-1)
+			self._pack_file(out, data, refdata)
+		else:
+			out = io.BytesIO()
+			self._pack_file(out, data, refdata)
+			out.seek(0)
+			return out.read()
+
+	def pack_into(self, buffer, offset, *data, refdata=()):
+		"""Pack data into an existing buffer at the given position
+
+		- buffer : writable bytes-like object (e.g. a bytearray), where the data
+		        will be written
+		- offset : position in the buffer to start writing from
+		- data : all elements to pack, in order
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[1] as a count)
+		"""
+		out = io.BytesIO()
+		self._pack_file(out, data, refdata)
+		out.seek(0)
+		packed = out.read()
+		buffer[offset: offset + len(packed)] = packed
+
+	def pack_file(self, file, *data, position=None, refdata=()):
+		"""Pack data into a file-like object
+
+		- file : writable binary file-like object, where the data will be
+		        written. It is left after the data that has been written
+		- data : all elements to pack, in order
+		- position : absolute position in the file to start writing from.
+		        Defaults to the current position
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[1] as a count)
+		"""
+		if position is not None:
+			file.seek(position)
+		self._pack_file(file, data, refdata)
+
+	def iter_unpack(self, data, names=None, refdata=()):
+		"""Create an iterator that successively unpacks according to this
+		structure at each iteration
+
+		- data : any bytes-like or binary readable file-like object, all data
+		        is read from it. If it is a file-like object, reading starts
+				from its current position and leaves it after the data that
+				has been read
+		- names : names for each element of data unpacked by this structure.
+		        This can be a list of names, a string with space-separated
+				field names, or a callable that takes each field in order as
+				arguments (for instance a `namedtuple` type or a `dataclass`)
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[0] as a count)
+		"""
+
+		if hasattr(data, "read") and hasattr(data, "seek") and hasattr(data, "tell"):  # From file-like object
+			buffer = data
+			pos = buffer.tell()
+			buffer.seek(0, 2)
+			end = buffer.tell()
+			buffer.seek(pos)
+		else:
+			buffer = io.BytesIO(data)
+			end = len(data)
+
+		while buffer.tell() < end:
+			unpacked = self._unpack_file(buffer, self.tokens, refdata)
+			if hasattr(names, '__call__'):  #trying to recognize a callable, like a namedtuple
+				unpacked = names(unpacked)
+			elif names is not None:
+				unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
+			elif self.names is not None:
+				unpacked = self.names(*unpacked)
+			yield unpacked
+
+	def calcsize(self, refdata=None, tokens=None):
+		"""Calculate the size in bytes of the data represented by this structure
+
+		- refdata : list of values that are referenced by external references in
+		        the structure (e.g. `#1` uses refdata[1] as a count)
+		When the size is indeterminate (elements that require actual data as
+		context, like null-terminated strings, internal references, …), fail
+		with a FormatError
+		"""
+		if tokens is None:
+			tokens = self.tokens
+		size = 0
+		alignref = 0
+		for token in tokens:
+			if isinstance(token.count, _Reference):
+				if token.count.type == 3 and refdata is not None:
+					count = refdata[token.count.value]
+				else:
+					raise FormatError("Impossible to compute the size of a structure with references", self.format)
+			else:
+				count = token.count
+
+			if token.type in "[(":
+				size += count * self.calcsize(refdata, token.content)
+			elif token.type == "{":
+				raise FormatError("Impossible to compute the size of a structure with {} iterators", self.format)
+			elif token.type == "|":
+				alignref = size
+			else:
+				elementsize, referencable, directcount = _STRUCTURE_CHARACTERS[token.type]
+				if elementsize is None:
+					raise FormatError("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format)
+				elif elementsize == -1:
+					refdistance = size - alignref
+					padding = count - (refdistance % count or count)
+					size += padding
+				else:
+					size += count * elementsize
+		return size
+
+	def _parse_struct(self, format):
+		format = self._preprocess(format)
 		if format[0] in tuple(ENDIANNAMES.keys()):
 			self.byteorder = ENDIANNAMES[format[0]]
 			self.forcebyteorder = True
 			self.format = format = format[1:]
-		
-		self.tokens = self.parse_substructure(format)
-	
-	def preprocess(self, format):
+
+		self.tokens = self._parse_substructure(format)
+
+	def _preprocess(self, format):
 		format = format.strip().replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
 		while "'" in format:
 			start = format.find("'")
 			end = format.find("'", start + 1)
 			format = format[:start] + format[end + 1:]
 		return format
-	
-	def parse_substructure(self, format):
+
+	def _parse_substructure(self, format):
 		tokens = []
 		cut_countable = False
 		first_countable = 0
@@ -224,13 +549,13 @@ class Struct (object):
 				ptr += 1
 			else:  # Normal count
 				reftype = None
-			
+
 			# Parsing count
 			countstr = ""
 			while format[ptr].isdigit():
 				countstr += format[ptr]
 				ptr += 1
-			
+
 			if len(countstr) == 0:
 				if reftype is not None:
 					raise FormatError("No reference number", self.format, format, startptr)
@@ -251,7 +576,10 @@ class Struct (object):
 						elif self.safe_references and count > last_countable:
 							raise FormatError("Unsafe reference index : relative reference references in or beyond an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, format, startptr)
 					count = _Reference(reftype, count)
-			
+
+			if format[ptr] not in _STRUCTURE_CHARACTERS:
+				raise FormatError("Unrecognised character '" + format[ptr] + "'", self.format, format, startptr)
+			size, referencable, directcount = _STRUCTURE_CHARACTERS[format[ptr]]
 			# Groups
 			if format[ptr] in _GROUP_CHARACTERS:
 				openchar = format[ptr]
@@ -271,18 +599,13 @@ class Struct (object):
 					raise FormatError("Group starting with '" + openchar + "' is never closed")
 				subformat = subformat[:-1]
 				type = openchar
-				content = self.parse_substructure(subformat)
+				content = self._parse_substructure(subformat)
 			else:  # Standard structure elements
-				if format[ptr] not in _STRUCTURE_CHARACTERS:
-					raise FormatError("Unrecognised character '" + format[ptr] + "'", self.format, format, startptr)
-				else:
-					type = format[ptr]
-					
+				type = format[ptr]
 				content = None
 				ptr += 1
 
 				# Get the number of actual elements in this token, or None if indeterminate (reference)
-				directcount = _STRUCTURE_CHARACTERS[type][2]
 				if directcount is None:
 					elements = 0
 				elif directcount:
@@ -293,9 +616,14 @@ class Struct (object):
 				raise FormatError("'" + type + "' elements should not be multiple", self.format, format, startptr)
 			if ptr < len(format) and type in _END_STRUCTURE:
 				raise FormatError("'" + type + "' terminates the structure, there should be nothing else afterwards", self.format, format, startptr)
-			token = _Token(count, type, content)
-			tokens.append(token)
-			
+
+			# Slight optimization for pack and unpack : reduce things like IIII -> 4I
+			if directcount and len(tokens) > 0 and type == tokens[-1].type and not isinstance(count, _Reference) and not isinstance(tokens[-1].count, _Reference):
+				tokens[-1].count += count
+			else:
+				token = _Token(count, type, content)
+				tokens.append(token)
+
 			if elements is None:  # Uncountable interruption
 				cut_countable = True
 				last_countable = 0
@@ -303,146 +631,16 @@ class Struct (object):
 				last_countable += elements
 				if not cut_countable:
 					first_countable += elements
-				
+
 		return tokens
-	
-	def pprint(self, tokens=None):
-		out = ""
-		if tokens is None:
-			tokens = self.tokens
-		for token in tokens:
-			out += str(token) + "\n"
-			if token.content is not None:
-				substruct = self.pprint(token.content)
-				out += "\n".join(["\t" + line for line in substruct.splitlines()]) + "\n"
-		return out
-	
-	def setbyteorder(self, byteorder):
-		if byteorder in ENDIANNAMES:
-			byteorder = ENDIANNAMES[byteorder]
-		self.forcebyteorder = True
-		self.byteorder = byteorder
-	
-	def unpack(self, data, names=None, refdata=()):
-		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
-			unpacked = self._unpack_file(data, self.tokens, refdata)
-		else:  # From bytes-like objet
-			unpacked = self._unpack_file(io.BytesIO(data), self.tokens, refdata)
-		
-		if hasattr(names, '_fields') and hasattr(names, '_asdict'):  #trying to recognize a namedtuple
-			unpacked = names(unpacked)
-		elif names is not None:
-			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-		elif self.names is not None:
-			unpacked = self.names(*unpacked)
-		return unpacked
-	
-	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False):
-		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
-			if offset is not None:
-				data.seek(offset)
-			unpacked = self._unpack_file(data, self.tokens, refdata)
-		else:  # From bytes-like objet
-			data = io.BytesIO(data)
-			if offset is not None:
-				data.seek(offset)
-			unpacked = self._unpack_file(data, self.tokens, refdata)
-		
-		if hasattr(names, '_fields') and hasattr(names, '_asdict'):  #trying to recognize a namedtuple
-			unpacked = names(unpacked)
-		elif names is not None:
-			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-		elif self.names is not None:
-			unpacked = self.names(*unpacked)
-		
-		if getptr:
-			return unpacked, data.tell()
-		else:
-			return unpacked
-	
-	def pack(self, *data, refdata=()):
-		data = list(data)
-		
-		if len(data) > 0 and hasattr(data[-1], "write") and hasattr(data, "seek"):  # Into file-like object
-			out = data.pop(-1)
-			self._pack_file(out, data, refdata)
-		else:
-			out = io.BytesIO()
-			self._pack_file(out, data, refdata)
-			out.seek(0)
-			return out.read()
-	
-	def pack_into(self, buffer, offset, *data, refdata=()):
-		out = io.BytesIO()
-		self._pack_file(out, data, refdata)
-		out.seek(0)
-		packed = out.read()
-		buffer[offset: offset + len(packed)] = packed
-	
-	def pack_file(self, file, *data, position=None, refdata=()):
-		if position is not None:
-			file.seek(position)
-		self._pack_file(file, data, refdata)
-	
-	def iter_unpack(self, data, names=None, refdata=()):
-		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
-			buffer = data
-		else:
-			buffer = io.BytesIO(data)
-		pos = buffer.tell()
-		buffer.seek(0, 2)
-		end = buffer.tell()
-		buffer.seek(pos)
-		while buffer.tell() < end:
-			unpacked = self._unpack_file(buffer, self.tokens, refdata)
-			if hasattr(names, '_fields') and hasattr(names, '_asdict'):  #trying to recognize a namedtuple
-				unpacked = names(unpacked)
-			elif names is not None:
-				unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-			elif self.names is not None:
-				unpacked = self.names(*unpacked)
-			yield unpacked
-	
-	def calcsize(self, refdata=None, tokens=None):
-		if tokens is None:
-			tokens = self.tokens
-		size = 0
-		alignref = 0
-		for token in tokens:
-			if isinstance(token.count, _Reference):
-				if token.count.type == 3 and refdata is not None:
-					count = refdata[token.count.value]
-				else:
-					raise FormatError("Impossible to compute the size of a structure with references", self.format)
-			else:
-				count = token.count
-			
-			if token.type in "[(":
-				size += count * self.calcsize(refdata, token.content)
-			elif token.type == "{":
-				raise FormatError("Impossible to compute the size of a structure with {} iterators", self.format)
-			elif token.type == "|":
-				alignref = size
-			else:
-				elementsize, referencable, directcount = _STRUCTURE_CHARACTERS[token.type]
-				if elementsize is None:
-					raise FormatError("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format)
-				elif elementsize == -1:
-					refdistance = size - alignref
-					padding = count - (refdistance % count or count)
-					size += padding
-				else:
-					size += count * elementsize
-		return size
-	
-	
+
 	def _read(self, data, length=-1):
 		read = data.read(length)
 		if len(read) < length:
 			raise IndexError("Not enough data to read")
 		else:
 			return read
-	
+
 	def _resolve_count(self, count, unpacked, refdata):
 		if isinstance(count, _Reference):
 			try:
@@ -462,7 +660,7 @@ class Struct (object):
 				raise ResolutionError("Invalid " + _Reference._REFERENCE_TYPE_NAMES[count.type] + " reference index : " + str(count.value), self.format) from exc
 		else:
 			return count
-	
+
 	def _convert_mantissa(self, mantissa, size):
 		result = 0
 		factor = 2**(-size)
@@ -471,65 +669,88 @@ class Struct (object):
 			mantissa >>= 1
 			factor *= 2
 		return result
-	
-	def _build_float(self, value, exponentsize, mantissasize, bias):
-		sign = (0 if value >= 0 else 1)
+
+	def _decode_float(self, data, exponentsize, mantissasize):
+		maxed_exponent = (1 << exponentsize) - 1
+
+		encoded = int.from_bytes(data, byteorder=self.byteorder, signed=False)
+		base_exponent = (encoded >> mantissasize) & maxed_exponent
+		mantissa = encoded & ((1 << mantissasize) - 1)
+		sign = -1 if (encoded >> (exponentsize + mantissasize)) else 1
+
+		if base_exponent == 0:
+			# Exponent 0, mantissa = 0 -> zero
+			if mantissa == 0:
+				return sign * 0.0
+			# Exponent 0, mantissa ≠ 0 -> subnormal
+			else:
+				exponent = 2 - (1 << (exponentsize - 1))
+				denormalized = mantissa / 2**mantissasize
+				return sign * denormalized * 2**exponent
+		elif base_exponent == maxed_exponent:
+			# Maxed exponent, mantissa = 0 -> infinity
+			if mantissa == 0:
+				return sign * math.inf
+			# Maxed exponent, mantissa ≠ 0 -> NaN
+			else:
+				return math.nan
+		# Otherwise, normal number
+		else:
+			exponent = base_exponent - ((1 << (exponentsize - 1)) - 1)
+			normalized = 1 + mantissa / 2**mantissasize
+			return sign * normalized * 2**exponent
+
+	def _build_float(self, value, exponentsize, mantissasize):
+		maxed_exponent = (1 << exponentsize) - 1
+		size = 1 + exponentsize + mantissasize
+		sign = 0 if value >= 0 else 1
 		value = abs(value)
-		
+
 		if value == 0:
 			exponent = 0
 			mantissa = 0
 		elif value == math.inf:
-			exponent = (1 << exponentsize) - 1
+			exponent = maxed_exponent
 			mantissa = 0
-		elif math.isnan(value):
-			exponent = (1 << exponentsize) - 1
-			mantissa = 1 << (mantissasize - 1)  # Similar to struct's behaviour
+		elif math.isnan(value):  # Here, NaN is packed in the same way `struct` does
+			exponent = maxed_exponent
+			mantissa = 1 << (mantissasize - 1)
 			sign = 0
-			#mantissa = (1 << mantissasize) - 1
 		else:
-			exponent = 0
-			exponentrange = (1 << (exponentsize - 1)) - 1
-			
-			# Normalize the value (1.xxxxx for normal numbers)
-			normalised = value
-			while normalised >= 2 and exponent < exponentrange:  # Divide, positive exponent
-				normalised /= 2
-				exponent += 1
-			while normalised < 1 and -exponentrange + 1 < exponent:  # Multiply, negative exponent
-				normalised *= 2
-				exponent -= 1
-			# The value ended up as 1.xxxx : normal, we keep only the mantissa by removing the front 1
-			if 1 <= normalised < 2:
-				normalised -= 1
-			elif normalised < 1:  # Still <1 : subnormal
-				exponent = -exponentrange
-			else:  # Still >= 2 : Out of range
-				raise OverflowError("Floating-point value " + str(value) + " is out of range for " + str(exponentsize + mantissasize + 1) + " bits float")
-			
-			mantissa = 0
-			for _ in range(mantissasize):
-				normalised *= 2
-				intpart = int(normalised)
-				mantissa = (mantissa << 1) | intpart
-				normalised -= intpart
-			if 0.5 < normalised < 1 or (normalised == 0.5 and mantissa & 1):  # rounding to the nearest, ties to even
-				mantissa += 1
-			
-			# The value overflows because of the rounding
-			if mantissa >= 2**mantissasize:
-				raise OverflowError("Floating-point value " + str(value) + " is out of range for " + str(exponentsize + mantissasize + 1) + " bits float")
-			exponent += bias
+			min_biased_exponent = 2 - (1 << (exponentsize - 1))
+			max_biased_exponent = (1 << (exponentsize - 1)) - 1
+			biased_exponent = max(min_biased_exponent, min(math.floor(math.log2(value)), max_biased_exponent))
+			normalized = value / 2**biased_exponent
+
+			if normalized >= 2:
+				raise OverflowError(f"Floating-point value {value} is too big for {size*8} bits float")
+			elif normalized < 1:  # Still too small -> subnormal
+				exponent = 0
+			else:  # Normal number, strip the trivial 1
+				normalized -= 1
+				exponent = biased_exponent + max_biased_exponent
+
+			mantissa = normalized * (1 << mantissasize)
+			rounded_mantissa = int(mantissa)
+			remainder = mantissa - rounded_mantissa
+			# Staying with struct, round to the nearest, ties to even
+			if 0.5 < remainder < 1 or (remainder == 0.5 and rounded_mantissa & 1):
+				rounded_mantissa += 1
+				# On the upper edge of the value range, it is possible that the
+				# rounding made the value overflow without being detected earlier
+				if rounded_mantissa >= (1 << mantissasize):
+					raise OverflowError(f"Floating-point value {value} is too big for {size*8} bits float")
+			mantissa = rounded_mantissa
 		return sign, exponent, mantissa
-		
-	
+
+
 	def _unpack_file(self, data, tokens, refdata):
 		alignref = data.tell()
 		unpacked = []
-		
+
 		for token in tokens:
 			count = self._resolve_count(token.count, unpacked, refdata)
-			
+
 			try:
 				# Groups
 				if token.type == "(":
@@ -573,24 +794,7 @@ class Struct (object):
 					groupdata = self._read(data, size * count)
 					for i in range(count):
 						elementdata = groupdata[i*size: (i+1)*size]
-						
-						encoded = int.from_bytes(elementdata, byteorder=self.byteorder, signed=False)
-						sign = (-1 if (encoded >> (exponentsize + mantissasize)) else 1)
-						baseexponent = ((encoded >> mantissasize) & ((1 << exponentsize) - 1))
-						exponent = baseexponent - bias
-						mantissa = (encoded & ((1 << mantissasize) - 1))
-						if baseexponent == 0 and mantissa == 0:
-							decoded = sign * 0.0
-						elif baseexponent == 0 and mantissa != 0:
-							factor = self._convert_mantissa(mantissa, mantissasize)
-							decoded = sign * factor * (2 ** (exponent + 1))
-						elif baseexponent == (1 << exponentsize) - 1 and mantissa == 0:
-							decoded = sign * math.inf
-						elif baseexponent == (1 << exponentsize) - 1 and mantissa != 0:
-							decoded = math.nan
-						else:
-							factor = self._convert_mantissa(mantissa, mantissasize) + 1
-							decoded = sign * factor * (2 ** exponent)
+						decoded = self._decode_float(elementdata, exponentsize, mantissasize)
 						unpacked.append(decoded)
 				elif token.type == "x":
 					data.seek(count, 1)
@@ -617,9 +821,9 @@ class Struct (object):
 					unpacked.append(elementdata.hex())
 			except IndexError:
 				raise DataError("No data remaining to read element '" + token.type + "'", self.format)
-		
+
 		return unpacked
-	
+
 	def _pack_file(self, out, data, refdata, tokens=None):
 		if tokens is None:
 			tokens = self.tokens
@@ -668,9 +872,9 @@ class Struct (object):
 					for _ in range(count):
 						decoded = data[position]
 						position += 1
-						
-						sign, exponent, mantissa = self._build_float(decoded, exponentsize, mantissasize, bias)
-						encoded = (sign << (exponentsize + mantissasize)) | (exponent << mantissasize) | mantissa
+
+						sign, exponent, mantissa = self._build_float(decoded, exponentsize, mantissasize)
+						encoded = (((sign << exponentsize) | exponent) << mantissasize) | mantissa
 						elementdata += encoded.to_bytes(size, byteorder=self.byteorder, signed=False)
 					out.write(elementdata)
 				elif token.type == "x":
@@ -700,14 +904,14 @@ class Struct (object):
 			except IndexError:
 				raise DataError("No data remaining to pack into element '" + token.type + "'", self.format)
 		return position
-	
+
 	def _encode_string(self, data):
 		try:
 			string = data.encode("utf-8")
 		except (AttributeError, UnicodeDecodeError):
 			string = data
 		return string
-	
+
 	def _count_to_format(self, count):
 		if count == 1:
 			return ""
@@ -720,7 +924,7 @@ class Struct (object):
 				return "#" + str(count.value)
 		else:
 			return str(count)
-	
+
 	def _tokens_to_format(self, tokens):
 		format = ""
 		for token in tokens:
@@ -730,7 +934,7 @@ class Struct (object):
 			else:
 				format += self._count_to_format(token.count) + token.type + " "
 		return format.strip()
-	
+
 	def _max_external_reference(self, tokens):
 		maxref = -1
 		for token in tokens:
@@ -743,7 +947,7 @@ class Struct (object):
 				if submax > maxref:
 					maxref = submax
 		return maxref
-	
+
 	def _fix_external_references(self, tokens, leftexternals):
 		for token in tokens:
 			if isinstance(token.count, _Reference):
@@ -751,24 +955,38 @@ class Struct (object):
 					token.count.value += leftexternals
 			if token.content is not None:
 				self._fix_external_references(token.content, leftexternals)
-	
+
 	def _add_structs(self, lefttokens, righttokens):
-		leftsize = len(lefttokens)
-		leftexternals = self._max_external_reference(lefttokens) + 1 
+		leftexternals = self._max_external_reference(lefttokens) + 1
 		right_has_references = any(isinstance(token.count, _Reference) and token.count.type == _Reference.Absolute for token in righttokens)
-		
+
 		outtokens = []
+		leftsize = 0
 		for token in lefttokens:
 			if token.type in ("{", "$"):
 				raise FormatError("'" + token.type + ("}" if token.type == "{" else "") + "' forces the end of the structure, you can’t add or multiply structures if it causes those elements to be in the middle of the resulting structure")
 			elif right_has_references and isinstance(token.count, _Reference) and _STRUCTURE_CHARACTERS[token.type][2]:
 				raise FormatError("The left operand has an indeterminate amount of elements, impossible to fix right side absolute references")
 			outtokens.append(token.copy())
-			
+
+			if leftsize is not None:
+				directcount = _STRUCTURE_CHARACTERS[token.type][2]
+				if directcount is None:
+					pass
+				elif directcount:
+					if isinstance(token.count, _Reference):
+						leftsize = None
+					else:
+						leftsize += token.count
+				else:
+					leftsize += 1
+
 		for token in righttokens:
 			newtoken = token.copy()
 			if isinstance(newtoken.count, _Reference):
 				if newtoken.count.type == _Reference.Absolute:
+					if leftsize is None:
+						raise FormatError("The left operand has an indeterminate amount of elements, impossible to fix right side absolute references")
 					newtoken.count.value += leftsize
 				elif newtoken.count.type == _Reference.External:
 					newtoken.count.value += leftexternals
@@ -777,14 +995,28 @@ class Struct (object):
 			outtokens.append(newtoken)
 		outformat = self._tokens_to_format(outtokens)
 		return outtokens, outformat
-	
+
 	def _multiply_struct(self, tokens, num):
-		blocksize = len(tokens)
+		blocksize = 0
+		for token in tokens:
+			directcount = _STRUCTURE_CHARACTERS[token.type][2]
+			if blocksize is not None:
+				if directcount is None:
+					pass
+				elif directcount:
+					if isinstance(token.count, _Reference):
+						blocksize = None
+					else:
+						blocksize += token.count
+				else:
+					blocksize += 1
+			else:
+				break
+
 		blockexternals = self._max_external_reference(tokens) + 1
-		has_indeterminate = any(isinstance(token.count, _Reference) and token.count.type == _Reference.Absolute and _STRUCTURE_CHARACTERS[token.type][2] for token in tokens)
-		if num > 1 and has_indeterminate:
+		if num > 1 and blocksize is None:
 			raise FormatError("The multiplied structure contains an indeterminate amount of elements, impossible to fix absolute references")
-		
+
 		size = 0
 		externals = 0
 		outtokens = []
@@ -805,56 +1037,56 @@ class Struct (object):
 			externals += blockexternals
 		outformat = self._tokens_to_format(outtokens)
 		return outtokens, outformat
-				
-	
+
+
 	def __add__(self, stct):
 		if not isinstance(stct, Struct):
 			stct = Struct(stct)
 		newtokens, newformat = self._add_structs(self.tokens, stct.tokens)
-		
+
 		newstruct = Struct()
 		newstruct.format = newformat
 		newstruct.tokens = newtokens
 		if self.forcebyteorder:
 			newstruct.setbyteorder(self.byteorder)
 		return newstruct
-	
+
 	def __iadd__(self, stct):
 		if not isinstance(stct, Struct):
 			stct = Struct(stct)
 		newtokens, newformat = self._add_structs(self.tokens, stct.tokens)
-		
+
 		self.tokens = newtokens
 		self.format = newformat
 		return self
-	
+
 	def __radd__(self, stct):
 		if not isinstance(stct, Struct):
 			stct = Struct(stct)
 		newtokens, newformat = self._add_structs(stct.tokens, self.tokens)
-		
+
 		newstruct = Struct()
 		if stct.forcebyteorder:
 			newstruct.setbyteorder(stct.byteorder)
 		newstruct.tokens = newtokens
 		newstruct.format = newformat
 		return newstruct
-	
+
 	def __mul__(self, n):
 		if n == 0:
 			return Struct("")
 		elif n == 1:
 			return Struct(self)
-		
+
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
-		
+
 		newstruct = Struct()
 		if self.forcebyteorder:
 			newstruct.setbyteorder(self.byteorder)
 		newstruct.tokens = newtokens
 		newstruct.format = newformat
 		return newstruct
-	
+
 	def __imul__(self, n):
 		if n == 0:
 			self.format = ""
@@ -870,7 +1102,7 @@ class Struct (object):
 			return Struct("")
 		elif n == 1:
 			return Struct(self)
-			
+
 		newtokens, newformat = self._multiply_struct(self.tokens, n)
 		newstruct = Struct()
 		if self.forcebyteorder:
@@ -878,10 +1110,10 @@ class Struct (object):
 		newstruct.tokens = newtokens
 		newstruct.format = newformat
 		return newstruct
-	
+
 	def __repr__(self):
 		return "Struct(\"" + self.format + "\")"
-	
+
 	def __str__(self):
 		return self.__repr__()
 
@@ -889,13 +1121,13 @@ class Struct (object):
 class TypeUser (object):
 	def __init__(self, byteorder="@"):
 		self.byteorder = ENDIANNAMES[byteorder]
-	
+
 	def unpack(self, structure, data, names=None, refdata=()):
 		stct = Struct(structure)
 		if not stct.forcebyteorder:
 			stct.setbyteorder(self.byteorder)
 		return stct.unpack(data, names, refdata)
-	
+
 	def unpack(self, structure, data, names=None, refdata=()):
 		stct = Struct(structure)
 		if not stct.forcebyteorder:
@@ -925,7 +1157,7 @@ class TypeUser (object):
 		if not stct.forcebyteorder:
 			stct.setbyteorder(self.byteorder)
 		return stct.pack_into(buffer, offset, *data, refdata=refdata)
-	
+
 	def pack_file(self, structure, file, *data, position=None, refdata=()):
 		stct = Struct(structure)
 		if not stct.forcebyteorder:
@@ -943,7 +1175,7 @@ def _readermethod(stct):
 			(result, ), ptr = self.unpack_from(stct, data, ptr, getptr=True)
 			return result, ptr
 		return _TypeReader_method
-		
+
 class TypeReader (TypeUser):
 	bool = _readermethod(Struct("?"))
 	int8 = _readermethod(Struct("b"))
@@ -961,17 +1193,17 @@ class TypeReader (TypeUser):
 	double = float64 = _readermethod(Struct("d"))
 	quad = float128 = _readermethod(Struct("F"))
 	string = _readermethod(Struct("n"))
-	
+
 	def tobits(self, n, align=8):
 		return [int(bit) for bit in bin(n, align)]
-		
+
 	def bit(self, n, bit, length=1):
 		mask = ((2 ** length) - 1) << bit
 		return (n & mask) >> (bit - length)
-	
+
 	def nibbles(self, n):
 		return (n >> 4, n & 0xf)
-	
+
 	def signed_nibbles(self, n):
 		high = (n >> 4)
 		if high >= 8:
@@ -980,7 +1212,7 @@ class TypeReader (TypeUser):
 		if low >= 8:
 			low -= 16
 		return high, low
-	
+
 	def utf16string(self, data, ptr):
 		subdata = data[ptr:]
 		s = []
@@ -1003,8 +1235,8 @@ def _writermethod(stct):
 			else:
 				self.pack(stct, data, out)
 		return _TypeWriter_method
-		
-class TypeWriter (TypeUser):	
+
+class TypeWriter (TypeUser):
 	bool = _writermethod(Struct("?"))
 	int8 = _writermethod(Struct("b"))
 	uint8 = _writermethod(Struct("B"))
@@ -1020,17 +1252,17 @@ class TypeWriter (TypeUser):
 	single = float = float32 = _writermethod(Struct("f"))
 	double = float64 = _writermethod(Struct("d"))
 	quad = float128 = _writermethod(Struct("F"))
-	
+
 	def nibbles(self, high, low):
 		return (high << 4) + (low & 0xf)
-	
+
 	def signed_nibbles(self, high, low):
 		if high < 0:
 			high += 16
 		if low < 0:
 			low += 16
 		return (high << 4) + (low & 0xf)
-		
+
 	def string(self, data, align=0, out=None):
 		if isinstance(data, str):
 			s = data.encode('utf-8')
@@ -1041,7 +1273,7 @@ class TypeWriter (TypeUser):
 			return res
 		else:
 			out.write(res)
-	
+
 	def utf16string(self, data, align=0, out=None):
 		endian = 'le' if self.byteorder == 'little' else 'be'
 		s = data.encode('utf-16-%s' % endian) + b'\x00\x00'
@@ -1052,10 +1284,10 @@ class TypeWriter (TypeUser):
 			return res
 		else:
 			out.write(res)
-	
+
 	def pad(self, num):
 		return b'\x00' * num
-	
+
 	def align(self, data, alignment):
 		if isinstance(data, int):
 			length = data
@@ -1066,29 +1298,114 @@ class TypeWriter (TypeUser):
 
 
 def unpack(structure, data, names=None, refdata=()):
+	"""Unpack data from the given source
+
+	- structure : format string or Struct object
+	- data : any bytes-like or binary readable file-like object, all data
+			is read from it. If it is a file-like object, reading starts
+			from its current position and leaves it after the data that
+			has been read
+	- names : names for each element of data unpacked by this structure.
+			This can be a list of names, a string with space-separated
+			field names, or a callable that takes each field in order as
+			arguments (for instance a `namedtuple` type or a `dataclass`)
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[0] as a count)
+	"""
 	stct = Struct(structure)
 	return stct.unpack(data, names, refdata)
 
 def unpack_from(structure, data, offset=None, names=None, refdata=(), getptr=False):
+	"""Unpack data from the given source at the given position
+
+	- structure : format string or Struct object
+	- data : any bytes-like or binary readable file-like object, all data
+			is read from it. If it is a file-like object, reading starts
+			from the given absolute position and leaves it after the data
+			that has been read
+	- offset : Absolute position in the data or file to start reading from.
+			Defaults to 0 for bytes-like objects or the current position for
+			file-like objects
+	- names : names for each element of data unpacked by this structure.
+			This can be a list of names, a string with space-separated
+			field names, or a callable that takes each field in order as
+			arguments (for instance a `namedtuple` type or a `dataclass`)
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[1] as a count)
+	- getptr : If set to True, also returns the position immediately after
+			the unpacked data
+	"""
 	stct = Struct(structure)
 	return stct.unpack_from(data, offset, names, refdata, getptr)
 
 def iter_unpack(structure, data, names=None, refdata=()):
+	"""Create an iterator that successively unpacks according to the
+	structure at each iteration
+
+	- structure : format string or Struct object
+	- data : any bytes-like or binary readable file-like object, all data
+			is read from it. If it is a file-like object, reading starts
+			from its current position and leaves it after the data that
+			has been read
+	- names : names for each element of data unpacked by this structure.
+			This can be a list of names, a string with space-separated
+			field names, or a callable that takes each field in order as
+			arguments (for instance a `namedtuple` type or a `dataclass`)
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[0] as a count)
+	"""
 	stct = Struct(structure)
 	return stct.iter_unpack(data, names, refdata)
 
 def pack(structure, *data, refdata=()):
+	"""Pack data as bytes according to this structure
+
+	- structure : format string or Struct object
+	- data : all elements to pack, in order
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[1] as a count)
+	"""
 	stct = Struct(structure)
 	return stct.pack(*data, refdata=refdata)
 
 def pack_into(structure, buffer, offset, *data, refdata=()):
+	"""Pack data into an existing buffer at the given position
+
+	- structure : format string or Struct object
+	- buffer : writable bytes-like object (e.g. a bytearray), where the data
+			will be written
+	- offset : position in the buffer to start writing from
+	- data : all elements to pack, in order
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[1] as a count)
+	"""
 	stct = Struct(structure)
 	return stct.pack_into(buffer, offset, *data, refdata=refdata)
 
 def pack_file(structure, file, *data, position=None, refdata=()):
+	"""Pack data into a file-like object
+
+	- structure : format string or Struct object
+	- file : writable binary file-like object, where the data will be
+			written. It is left after the data that has been written
+	- data : all elements to pack, in order
+	- position : absolute position in the file to start writing from.
+			Defaults to the current position
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[1] as a count)
+	"""
 	stct = Struct(structure)
 	return stct.pack_file(file, *data, position=position, refdata=refdata)
 
 def calcsize(structure, refdata=()):
+	"""Calculate the size in bytes of the data represented by this structure
+
+	- structure : format string or Struct object
+	- refdata : list of values that are referenced by external references in
+			the structure (e.g. `#1` uses refdata[1] as a count)
+	When the size is indeterminate (elements that require actual data as
+	context, like null-terminated strings, internal references, …), fail
+	with a FormatError
+	"""
 	stct = Struct(structure)
 	return stct.calcsize(refdata=refdata)
