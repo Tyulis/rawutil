@@ -138,41 +138,11 @@ def hextobytes(hx):
 
 
 class FormatError (Exception):
-	def __init__(self, message, format=None, subformat=None, position=None):
-		self.message = message
-		self.format = format
-		self.subformat = subformat
-		self.position = position
-
-	def __str__(self):
-		message = ""
-		if self.format is not None:
-			message += "In format '" + self.format + "'"
-		if self.subformat is not None:
-			message += ", in subformat '" + self.subformat + "'"
-		if self.position is not None:
-			message += ", at position " + str(self.position)
-		message += " : " + self.message
-		return message
-
-class ReferenceError (FormatError):
 	pass
 
 
 class OperationError (Exception):
-	def __init__(self, message, format=None, subformat=None):
-		self.message = message
-		self.format = format
-		self.subformat = subformat
-
-	def __str__(self):
-		message = ""
-		if self.format is not None:
-			message += "In format '" + self.format + "'"
-		if self.subformat is not None:
-			message += ", in subformat '" + self.subformat + "'"
-		message += " : " + self.message
-		return message
+	pass
 
 class DataError (OperationError):
 	pass
@@ -180,6 +150,9 @@ class DataError (OperationError):
 class ResolutionError (OperationError):
 	pass
 
+
+def _error_context(message, format, position):
+	return message + "\n\tIn format '" + format + "', position " + str(position) + "\n\t" + ('-' * (11+position)) + "^"
 
 
 class _Reference (object):
@@ -195,40 +168,31 @@ class _Reference (object):
 		self.type = type
 		self.value = value
 
-	def copy(self):
-		return _Reference(self.type, self.value)
+	def __repr__(self):
+		return self.__class__.__name__ + "(" + str(self.type) + ", " + str(self.value) + ")"
 
-	def __str__(self):
-		return "Ref(" + self._REFERENCE_TYPE_NAMES[self.type] + ", " + str(self.value) + ")"
-
-	def __repr(self):
-		return "_Reference(" + str(self.type) + ", " + str(self.value) + ")"
 
 class _Token (object):
-	__slots__ = ("count", "type", "content")
+	__slots__ = ("count", "type", "content", "position")
 
-	def __init__(self, count, type, content):
+	def __init__(self, count, type, content, position):
 		self.count = count
 		self.type = type
 		self.content = content
-
-	def copy(self):
-		if isinstance(self.count, _Reference):
-			count = self.count.copy()
-		else:
-			count = self.count
-		if self.content is None:
-			content = None
-		else:
-			content = [token.copy() for token in self.content]
-		return _Token(count, self.type, content)
-
-	def __str__(self):
-		return "(" + str(self.count) + ", " + self.type + ")"
+		self.position = position
 
 	def __repr__(self):
-		return "_Token(" + repr(self.count) + ", '" + self.type + "', " + repr(self.content) + ")"
+		return self.__class__.__name__ + "(" + repr(self.count) + ", '" + self.type + "', " + repr(self.content) + ", " + repr(self.position) + ")"
 
+
+def _read(data, length=-1):
+	readdata = data.read(length)
+	if len(readdata) < length:
+		raise IndexError("Not enough data to read")
+	return readdata
+
+def _list_identity(*elements):
+	return list(elements)
 
 _GROUP_CHARACTERS = {"(": ")", "[": "]", "{": "}"}
 _NO_MULTIPLE = "{|$"
@@ -294,21 +258,7 @@ class Struct (object):
 			self.forcebyteorder = False
 			self.tokens = []
 
-		if hasattr(names, '__call__'):  # Callable, like a namedtuple
-			self.names = names
-		elif names is not None:
-			self.names = collections.namedtuple('RawutilNameSpace', names)
-
-	def pprint(self, tokens=None):
-		out = ""
-		if tokens is None:
-			tokens = self.tokens
-		for token in tokens:
-			out += str(token) + "\n"
-			if token.content is not None:
-				substruct = self.pprint(token.content)
-				out += "\n".join(["\t" + line for line in substruct.splitlines()]) + "\n"
-		return out
+		self.names = self._build_result_converter(names)
 
 	def setbyteorder(self, byteorder):
 		if byteorder in ENDIANNAMES:
@@ -336,13 +286,8 @@ class Struct (object):
 		else:  # From bytes-like objet
 			unpacked = self._unpack_file(io.BytesIO(data), self.tokens, refdata)
 
-		if hasattr(names, '__call__'):  #trying to recognize a callable
-			unpacked = names(unpacked)
-		elif names is not None:
-			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-		elif self.names is not None:
-			unpacked = self.names(*unpacked)
-		return unpacked
+		result_converter = self._build_result_converter(names)
+		return result_converter(*unpacked)
 
 	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False):
 		"""Unpack data from the given source at the given position
@@ -374,12 +319,8 @@ class Struct (object):
 				data.seek(offset)
 			unpacked = self._unpack_file(data, self.tokens, refdata)
 
-		if hasattr(names, '__call__'):  #trying to recognize a callable, like a namedtuple
-			unpacked = names(unpacked)
-		elif names is not None:
-			unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-		elif self.names is not None:
-			unpacked = self.names(*unpacked)
+		result_converter = self._build_result_converter(names)
+		unpacked = result_converter(*unpacked)
 
 		if getptr:
 			return unpacked, data.tell()
@@ -461,15 +402,10 @@ class Struct (object):
 			buffer = io.BytesIO(data)
 			end = len(data)
 
+		result_converter = self._build_result_converter(names)
 		while buffer.tell() < end:
 			unpacked = self._unpack_file(buffer, self.tokens, refdata)
-			if hasattr(names, '__call__'):  #trying to recognize a callable, like a namedtuple
-				unpacked = names(unpacked)
-			elif names is not None:
-				unpacked = collections.namedtuple('RawutilNameSpace', names)(*unpacked)
-			elif self.names is not None:
-				unpacked = self.names(*unpacked)
-			yield unpacked
+			yield result_converter(*unpacked)
 
 	def calcsize(self, refdata=None, tokens=None):
 		"""Calculate the size in bytes of the data represented by this structure
@@ -489,20 +425,20 @@ class Struct (object):
 				if token.count.type == 3 and refdata is not None:
 					count = refdata[token.count.value]
 				else:
-					raise FormatError("Impossible to compute the size of a structure with references", self.format)
+					raise FormatError(_error_context("Impossible to compute the size of a structure with references", self.format, token.position))
 			else:
 				count = token.count
 
 			if token.type in "[(":
 				size += count * self.calcsize(refdata, token.content)
 			elif token.type == "{":
-				raise FormatError("Impossible to compute the size of a structure with {} iterators", self.format)
+				raise FormatError(_error_context("Impossible to compute the size of a structure with {} iterators", self.format, token.position))
 			elif token.type == "|":
 				alignref = size
 			else:
 				elementsize, referencable, directcount = _STRUCTURE_CHARACTERS[token.type]
 				if elementsize is None:
-					raise FormatError("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format)
+					raise FormatError(_error_context("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format, token.position))
 				elif elementsize == -1:
 					refdistance = size - alignref
 					padding = count - (refdistance % count or count)
@@ -512,29 +448,34 @@ class Struct (object):
 		return size
 
 	def _parse_struct(self, format):
-		format = self._preprocess(format)
+		format = format.strip()
 		if format[0] in tuple(ENDIANNAMES.keys()):
 			self.byteorder = ENDIANNAMES[format[0]]
 			self.forcebyteorder = True
-			self.format = format = format[1:]
+			format = format[1:]
+			startpos = 1
+		else:
+			startpos = 0
 
-		self.tokens = self._parse_substructure(format)
+		self.tokens = self._parse_substructure(format, startpos)
 
-	def _preprocess(self, format):
-		format = format.strip().replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
-		while "'" in format:
-			start = format.find("'")
-			end = format.find("'", start + 1)
-			format = format[:start] + format[end + 1:]
-		return format
-
-	def _parse_substructure(self, format):
+	def _parse_substructure(self, format, startpos):
 		tokens = []
 		cut_countable = False
 		first_countable = 0
 		last_countable = 0
 		ptr = 0
 		while ptr < len(format):
+			if format[ptr].isspace():
+				ptr += 1
+				continue
+			elif format[ptr] in ["'", '"']:
+				ptr += 1
+				while format[ptr] not in ["'", '"']:
+					ptr += 1
+				ptr += 1
+				continue
+
 			startptr = ptr
 			# References
 			if format[ptr] == "/":
@@ -544,7 +485,7 @@ class Struct (object):
 					ptr += 1
 				else:  # Absolute
 					reftype = _Reference.Absolute
-			elif format[ptr] == "#":  # Extern reference
+			elif format[ptr] == "#":  # External reference
 				reftype = _Reference.External
 				ptr += 1
 			else:  # Normal count
@@ -558,27 +499,27 @@ class Struct (object):
 
 			if len(countstr) == 0:
 				if reftype is not None:
-					raise FormatError("No reference number", self.format, format, startptr)
+					raise FormatError(_error_context("No reference index", self.format, startptr + startpos))
 				count = 1
 			else:
 				count = int(countstr)
 				if reftype is not None:
 					if reftype == _Reference.Absolute:
 						if not cut_countable and count >= first_countable:
-							raise FormatError("Invalid reference index : absolute reference unambiguously references itself or elements located after itself", self.format, format, startptr)
+							raise FormatError(_error_context("Invalid reference index : absolute reference unambiguously references itself or elements located after itself", self.format, startptr + startpos))
 						elif self.safe_references and count >= first_countable:
-							raise FormatError("Unsafe reference index : absolute reference references in or after an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, format, startptr)
+							raise FormatError(_error_context("Unsafe reference index : absolute reference references in or after an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, startptr + startpos))
 					if reftype == _Reference.Relative:
 						if count <= 0:
-							raise FormatError("Invalid reference index : relative reference references itself (the immediate previous element is /p1)", self.format, format, startptr)
+							raise FormatError(_error_context("Invalid reference index : relative reference references itself (the immediate previous element is /p1)", self.format, startptr + startpos))
 						elif not cut_countable and count > last_countable:
-							raise FormatError("Invalid reference index : relative reference references beyond the beginning of the format", self.format, format, startptr)
+							raise FormatError(_error_context("Invalid reference index : relative reference references beyond the beginning of the format", self.format, startptr + startpos))
 						elif self.safe_references and count > last_countable:
-							raise FormatError("Unsafe reference index : relative reference references in or beyond an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, format, startptr)
+							raise FormatError(_error_context("Unsafe reference index : relative reference references in or beyond an indeterminate amount of elements (typically a reference). If it is intended, use the parameter safe_references=False of the Struct() constructor", self.format, startptr + startpos))
 					count = _Reference(reftype, count)
 
 			if format[ptr] not in _STRUCTURE_CHARACTERS:
-				raise FormatError("Unrecognised character '" + format[ptr] + "'", self.format, format, startptr)
+				raise FormatError(_error_context("Unrecognised format character '" + format[ptr] + "'", self.format, startptr + startpos))
 			size, referencable, directcount = _STRUCTURE_CHARACTERS[format[ptr]]
 			# Groups
 			if format[ptr] in _GROUP_CHARACTERS:
@@ -596,10 +537,10 @@ class Struct (object):
 						level -= 1
 					ptr += 1
 				if level > 1:
-					raise FormatError("Group starting with '" + openchar + "' is never closed")
+					raise FormatError(_error_context("Group starting with '" + openchar + "' is never closed", self.format, startptr + startpos))
 				subformat = subformat[:-1]
 				type = openchar
-				content = self._parse_substructure(subformat)
+				content = self._parse_substructure(subformat, startptr + startpos)
 			else:  # Standard structure elements
 				type = format[ptr]
 				content = None
@@ -613,15 +554,15 @@ class Struct (object):
 				else:
 					elements = 1
 			if count != 1 and type in _NO_MULTIPLE:
-				raise FormatError("'" + type + "' elements should not be multiple", self.format, format, startptr)
+				raise FormatError(_error_context("'" + type + "' elements should not be multiple", self.format, startptr + startpos))
 			if ptr < len(format) and type in _END_STRUCTURE:
-				raise FormatError("'" + type + "' terminates the structure, there should be nothing else afterwards", self.format, format, startptr)
+				raise FormatError(_error_context("'" + type + "' terminates the structure, there should be nothing else afterwards", self.format, startptr + startpos))
 
 			# Slight optimization for pack and unpack : reduce things like IIII -> 4I
 			if directcount and len(tokens) > 0 and type == tokens[-1].type and not isinstance(count, _Reference) and not isinstance(tokens[-1].count, _Reference):
 				tokens[-1].count += count
 			else:
-				token = _Token(count, type, content)
+				token = _Token(count, type, content, startptr)
 				tokens.append(token)
 
 			if elements is None:  # Uncountable interruption
@@ -634,41 +575,34 @@ class Struct (object):
 
 		return tokens
 
-	def _read(self, data, length=-1):
-		read = data.read(length)
-		if len(read) < length:
-			raise IndexError("Not enough data to read")
+	def _build_result_converter(self, names):
+		# If not callable, make it a namedtuple
+		if names is None:
+			if self.names is None:
+				return _list_identity
+			else:
+				return self.names
+		elif hasattr(names, "__call__"):
+			return names
 		else:
-			return read
+			return collections.namedtuple("RawutilNameSpace", names)
 
-	def _resolve_count(self, count, unpacked, refdata):
-		if isinstance(count, _Reference):
+	def _resolve_count(self, token, unpacked, refdata):
+		if isinstance(token.count, _Reference):
 			try:
-				try:
-					if count.type == 1:  # Relative
-						value = unpacked[-count.value]
-					elif count.type == 2:  # Absolute
-						value = unpacked[count.value]
-					elif count.type == 3:  # External
-						value = refdata[count.value]
-					value = value.__index__()
-				except AttributeError as exc:
-					raise TypeError("Count from " + _Reference._REFERENCE_TYPE_NAMES[count.type] + " reference index " + str(count.value) + " must be an integer")
-
-				return value
+				if token.count.type == 1:    # Relative
+					value = unpacked[-token.count.value]
+				elif token.count.type == 2:  # Absolute
+					value = unpacked[token.count.value]
+				elif token.count.type == 3:  # External
+					value = refdata[token.count.value]
+				return value.__index__()
+			except AttributeError as exc:
+				raise TypeError(_error_context("Count from " + _Reference._REFERENCE_TYPE_NAMES[token.count.type] + " reference index " + str(token.count.value) + " must be an integer", self.format, token.position)) from exc
 			except IndexError as exc:
-				raise ResolutionError("Invalid " + _Reference._REFERENCE_TYPE_NAMES[count.type] + " reference index : " + str(count.value), self.format) from exc
+				raise ResolutionError(_error_context("Invalid " + _Reference._REFERENCE_TYPE_NAMES[token.count.type] + " reference index : " + str(token.count.value), self.format, token.position)) from exc
 		else:
-			return count
-
-	def _convert_mantissa(self, mantissa, size):
-		result = 0
-		factor = 2**(-size)
-		for _ in range(size):
-			result += (mantissa & 1) * factor
-			mantissa >>= 1
-			factor *= 2
-		return result
+			return token.count
 
 	def _decode_float(self, data, exponentsize, mantissasize):
 		maxed_exponent = (1 << exponentsize) - 1
@@ -700,7 +634,7 @@ class Struct (object):
 			normalized = 1 + mantissa / 2**mantissasize
 			return sign * normalized * 2**exponent
 
-	def _build_float(self, value, exponentsize, mantissasize):
+	def _build_float(self, token, value, exponentsize, mantissasize):
 		maxed_exponent = (1 << exponentsize) - 1
 		size = 1 + exponentsize + mantissasize
 		sign = 0 if value >= 0 else 1
@@ -723,7 +657,7 @@ class Struct (object):
 			normalized = value / 2**biased_exponent
 
 			if normalized >= 2:
-				raise OverflowError(f"Floating-point value {value} is too big for {size*8} bits float")
+				raise OverflowError(_error_context("Floating-point value " + str(value) + " is too big for " + str(size*8) + " bits float", self.format, token.position))
 			elif normalized < 1:  # Still too small -> subnormal
 				exponent = 0
 			else:  # Normal number, strip the trivial 1
@@ -739,7 +673,7 @@ class Struct (object):
 				# On the upper edge of the value range, it is possible that the
 				# rounding made the value overflow without being detected earlier
 				if rounded_mantissa >= (1 << mantissasize):
-					raise OverflowError(f"Floating-point value {value} is too big for {size*8} bits float")
+					raise OverflowError(_error_context("Floating-point value " + str(value) + " is too big for " + str(size*8) + " bits float", self.format, token.position))
 			mantissa = rounded_mantissa
 		return sign, exponent, mantissa
 
@@ -749,7 +683,7 @@ class Struct (object):
 		unpacked = []
 
 		for token in tokens:
-			count = self._resolve_count(token.count, unpacked, refdata)
+			count = self._resolve_count(token, unpacked, refdata)
 
 			try:
 				# Groups
@@ -770,7 +704,7 @@ class Struct (object):
 					while True:
 						try:
 							subgroup = self._unpack_file(data, token.content, refdata)
-						except OperationError:
+						except DataError:
 							break
 						sublist.append(subgroup)
 					unpacked.append(sublist)
@@ -782,16 +716,16 @@ class Struct (object):
 					padding = count - (refdistance % count or count)
 					data.seek(padding, 1)
 				elif token.type == "$":
-					unpacked.append(self._read(data))
+					unpacked.append(_read(data))
 				# Elements
 				elif token.type in _INTEGER_ELEMENTS:
 					signed, size = _INTEGER_ELEMENTS[token.type]
-					groupdata = self._read(data, size * count)
+					groupdata = _read(data, size * count)
 					for i in range(count):
 						unpacked.append(int.from_bytes(groupdata[i*size: (i+1)*size], byteorder=self.byteorder, signed=signed))
 				elif token.type in _FLOAT_ELEMENTS:
 					size, exponentsize, mantissasize, bias = _FLOAT_ELEMENTS[token.type]
-					groupdata = self._read(data, size * count)
+					groupdata = _read(data, size * count)
 					for i in range(count):
 						elementdata = groupdata[i*size: (i+1)*size]
 						decoded = self._decode_float(elementdata, exponentsize, mantissasize)
@@ -799,28 +733,28 @@ class Struct (object):
 				elif token.type == "x":
 					data.seek(count, 1)
 				elif token.type == "?":
-					elementdata = self._read(data, count)
+					elementdata = _read(data, count)
 					unpacked.extend([bool(byte) for byte in elementdata])
 				elif token.type == "c":
-					elementdata = self._read(data, count)
+					elementdata = _read(data, count)
 					unpacked.extend([bytes((byte, )) for byte in elementdata])
 				elif token.type == "s":
-					unpacked.append(self._read(data, count))
+					unpacked.append(_read(data, count))
 				elif token.type == "n":
 					for _ in range(count):
 						string = b""
 						while True:
-							char = self._read(data, 1)
+							char = _read(data, 1)
 							if char == b"\x00":
 								break
 							else:
 								string += char
 						unpacked.append(string)
 				elif token.type == "X":
-					elementdata = self._read(data, count)
+					elementdata = _read(data, count)
 					unpacked.append(elementdata.hex())
 			except IndexError:
-				raise DataError("No data remaining to read element '" + token.type + "'", self.format)
+				raise DataError(_error_context("No data remaining to read element '" + token.type + "'", self.format, token.position))
 
 		return unpacked
 
@@ -830,7 +764,7 @@ class Struct (object):
 		position = 0
 		alignref = out.tell()
 		for token in tokens:
-			count = self._resolve_count(token.count, data[:position], refdata)
+			count = self._resolve_count(token, data[:position], refdata)
 			try:
 				# Groups
 				if token.type == "(":
@@ -864,7 +798,7 @@ class Struct (object):
 							elementdata += data[position].to_bytes(size, byteorder=self.byteorder, signed=signed)
 							position += 1
 					except AttributeError as exc:
-						raise TypeError("Wrong type for format %s, the given object must be an integer or have a .to_bytes() method similar to int" % token.type)
+						raise TypeError(_error_context("Wrong type for format '" + token.type + "', the given object must be an integer or have a .to_bytes() method similar to int", self.format, token.position))
 					out.write(elementdata)
 				elif token.type in _FLOAT_ELEMENTS:
 					size, exponentsize, mantissasize, bias = _FLOAT_ELEMENTS[token.type]
@@ -873,7 +807,7 @@ class Struct (object):
 						decoded = data[position]
 						position += 1
 
-						sign, exponent, mantissa = self._build_float(decoded, exponentsize, mantissasize)
+						sign, exponent, mantissa = self._build_float(token, decoded, exponentsize, mantissasize)
 						encoded = (((sign << exponentsize) | exponent) << mantissasize) | mantissa
 						elementdata += encoded.to_bytes(size, byteorder=self.byteorder, signed=False)
 					out.write(elementdata)
@@ -890,7 +824,7 @@ class Struct (object):
 				elif token.type == "s":
 					string = self._encode_string(data[position])
 					if len(string) != count:
-						raise OperationError("Length of structure element 's' (" + str(count) + " and data '" + repr(data[position]) + "' do not match", self.format)
+						raise OperationError(_error_context("Length of structure element 's' (" + str(count) + " and data '" + repr(data[position]) + "' do not match", self.format, token.position))
 					out.write(string)
 					position += 1
 				elif token.type == "n":
@@ -902,7 +836,7 @@ class Struct (object):
 					out.write(bytes.fromhex(data[position]))
 					position += 1
 			except IndexError:
-				raise DataError("No data remaining to pack into element '" + token.type + "'", self.format)
+				raise DataError(_error_context("No data remaining to pack into element '" + token.type + "'", self.format, token.position))
 		return position
 
 	def _encode_string(self, data):
@@ -967,7 +901,7 @@ class Struct (object):
 				raise FormatError("'" + token.type + ("}" if token.type == "{" else "") + "' forces the end of the structure, you can’t add or multiply structures if it causes those elements to be in the middle of the resulting structure")
 			elif right_has_references and isinstance(token.count, _Reference) and _STRUCTURE_CHARACTERS[token.type][2]:
 				raise FormatError("The left operand has an indeterminate amount of elements, impossible to fix right side absolute references")
-			outtokens.append(token.copy())
+			outtokens.append(copy.deepcopy(token))
 
 			if leftsize is not None:
 				directcount = _STRUCTURE_CHARACTERS[token.type][2]
@@ -982,7 +916,7 @@ class Struct (object):
 					leftsize += 1
 
 		for token in righttokens:
-			newtoken = token.copy()
+			newtoken = copy.deepcopy(token)
 			if isinstance(newtoken.count, _Reference):
 				if newtoken.count.type == _Reference.Absolute:
 					if leftsize is None:
@@ -1024,7 +958,7 @@ class Struct (object):
 			for token in tokens:
 				if token.type in ("{", "$"):
 					raise FormatError("'" + token.type + ("}" if token.type == "{" else "") + "' forces the end of the structure, you can’t add or multiply structures if it causes those elements to be in the middle of the resulting structure")
-				newtoken = token.copy()
+				newtoken = copy.deepcopy(token)
 				if isinstance(newtoken.count, _Reference):
 					if newtoken.count.type == 2:  # absolute
 						newtoken.count.value += size
