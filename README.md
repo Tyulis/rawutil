@@ -201,20 +201,22 @@ You can also set the element names once, they will then be used by default every
 Any function that accepts a format string also accepts Struct objects.
 A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple. The `safe_references`, when set to `False`, allows some seemingly unsafe but sometimes desirable behaviours described in the *References* section.
 It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
+You can retrieve the byte order with the `byteorder` attribute (can be `"little"` or `"big"`), and the format string (without byte order mark) with the `format` attribute.
+You can also tell whether the structure has an assigned byte order with the `forcebyteorder` attribute.
+
 For convenience, Struct also defines the module-level functions, for the structure it represents (without the `structure` argument as it is for the represented structure) :
 
 ```python
-unpack(self, data, names=None, refdata=())
-unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False)
-iter_unpack(self, data, names=None, refdata=())
-pack(self, *data, refdata=())
-pack_into(self, buffer, offset, *data, refdata=())
-pack_file(self, file, *data, position=None, refdata=())
+unpack(self, data, names=None, refdata=(), byteorder=None)
+unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False, byteorder=None)
+iter_unpack(self, data, names=None, refdata=(), byteorder=None)
+pack(self, *data, refdata=(), byteorder=None)
+pack_into(self, buffer, offset, *data, refdata=(), byteorder=None)
+pack_file(self, file, *data, position=None, refdata=(), byteorder=None)
 calcsize(self, refdata=None, tokens=None)
 ```
 
-You can retrieve the byte order with the `byteorder` attribute (can be `"little"` or `"big"`), and the format string (without byte order mark) with the `format` attribute.
-You can also tell whether the structure has an assigned byte order with the `forcebyteorder` attribute.
+In these method, you can override the structure byteorder on a given use with `byteorder = "little" / "big"`
 
 It is also possible to add structures (it can add Struct and format strings transparently), and multiply a Struct object :
 

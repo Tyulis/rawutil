@@ -1,7 +1,7 @@
 # -*- coding:utf-8 -*-
 # MIT License
 #
-# Copyright (c) 2017-2022 Tyulis
+# Copyright (c) 2017-2024 Tyulis
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -97,7 +97,7 @@ import builtins
 import binascii
 import collections
 
-__version__ = "2.7.4"
+__version__ = "2.8.0"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
@@ -266,7 +266,7 @@ class Struct (object):
 		self.forcebyteorder = True
 		self.byteorder = byteorder
 
-	def unpack(self, data, names=None, refdata=()):
+	def unpack(self, data, names=None, refdata=(), byteorder=None):
 		"""Unpack data from the given source according to this structure
 
 		- data : any bytes-like or binary readable file-like object, all data
@@ -279,17 +279,21 @@ class Struct (object):
 				arguments (for instance a `namedtuple` type or a `dataclass`)
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[0] as a count)
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
 
+		if byteorder is None:
+			byteorder = self.byteorder
+
 		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
-			unpacked = self._unpack_file(data, self.tokens, refdata)
+			unpacked = self._unpack_file(data, self.tokens, refdata, byteorder)
 		else:  # From bytes-like objet
-			unpacked = self._unpack_file(io.BytesIO(data), self.tokens, refdata)
+			unpacked = self._unpack_file(io.BytesIO(data), self.tokens, refdata, byteorder)
 
 		result_converter = self._build_result_converter(names)
 		return result_converter(*unpacked)
 
-	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False):
+	def unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False, byteorder=None):
 		"""Unpack data from the given source at the given position
 
 		- data : any bytes-like or binary readable file-like object, all data
@@ -307,17 +311,21 @@ class Struct (object):
 		        the structure (e.g. `#1` uses refdata[1] as a count)
 		- getptr : If set to True, also returns the position immediately after
 		        the unpacked data
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
+
+		if byteorder is None:
+			byteorder = self.byteorder
 
 		if hasattr(data, "read") and hasattr(data, "tell"):  # From file-like object
 			if offset is not None:
 				data.seek(offset)
-			unpacked = self._unpack_file(data, self.tokens, refdata)
+			unpacked = self._unpack_file(data, self.tokens, refdata, byteorder)
 		else:  # From bytes-like objet
 			data = io.BytesIO(data)
 			if offset is not None:
 				data.seek(offset)
-			unpacked = self._unpack_file(data, self.tokens, refdata)
+			unpacked = self._unpack_file(data, self.tokens, refdata, byteorder)
 
 		result_converter = self._build_result_converter(names)
 		unpacked = result_converter(*unpacked)
@@ -327,25 +335,29 @@ class Struct (object):
 		else:
 			return unpacked
 
-	def pack(self, *data, refdata=()):
+	def pack(self, *data, refdata=(), byteorder=None):
 		"""Pack data as bytes according to this structure
 
 		- data : all elements to pack, in order
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
+		if byteorder is None:
+			byteorder = self.byteorder
+
 		data = list(data)
 
 		if len(data) > 0 and hasattr(data[-1], "write") and hasattr(data, "seek"):  # Into file-like object
 			out = data.pop(-1)
-			self._pack_file(out, data, refdata)
+			self._pack_file(out, data, refdata, byteorder)
 		else:
 			out = io.BytesIO()
-			self._pack_file(out, data, refdata)
+			self._pack_file(out, data, refdata, byteorder)
 			out.seek(0)
 			return out.read()
 
-	def pack_into(self, buffer, offset, *data, refdata=()):
+	def pack_into(self, buffer, offset, *data, refdata=(), byteorder=None):
 		"""Pack data into an existing buffer at the given position
 
 		- buffer : writable bytes-like object (e.g. a bytearray), where the data
@@ -354,14 +366,18 @@ class Struct (object):
 		- data : all elements to pack, in order
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
+		if byteorder is None:
+			byteorder = self.byteorder
+
 		out = io.BytesIO()
-		self._pack_file(out, data, refdata)
+		self._pack_file(out, data, refdata, byteorder)
 		out.seek(0)
 		packed = out.read()
 		buffer[offset: offset + len(packed)] = packed
 
-	def pack_file(self, file, *data, position=None, refdata=()):
+	def pack_file(self, file, *data, position=None, refdata=(), byteorder=None):
 		"""Pack data into a file-like object
 
 		- file : writable binary file-like object, where the data will be
@@ -371,12 +387,16 @@ class Struct (object):
 		        Defaults to the current position
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
+		if byteorder is None:
+			byteorder = self.byteorder
+
 		if position is not None:
 			file.seek(position)
-		self._pack_file(file, data, refdata)
+		self._pack_file(file, data, refdata, byteorder)
 
-	def iter_unpack(self, data, names=None, refdata=()):
+	def iter_unpack(self, data, names=None, refdata=(), byteorder=None):
 		"""Create an iterator that successively unpacks according to this
 		structure at each iteration
 
@@ -390,7 +410,10 @@ class Struct (object):
 				arguments (for instance a `namedtuple` type or a `dataclass`)
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[0] as a count)
+		- byteorder : Force the byte order for this action only ("little" / "big")
 		"""
+		if byteorder is None:
+			byteorder = self.byteorder
 
 		if hasattr(data, "read") and hasattr(data, "seek") and hasattr(data, "tell"):  # From file-like object
 			buffer = data
@@ -404,7 +427,7 @@ class Struct (object):
 
 		result_converter = self._build_result_converter(names)
 		while buffer.tell() < end:
-			unpacked = self._unpack_file(buffer, self.tokens, refdata)
+			unpacked = self._unpack_file(buffer, self.tokens, refdata, byteorder)
 			yield result_converter(*unpacked)
 
 	def calcsize(self, refdata=None, tokens=None):
@@ -604,10 +627,10 @@ class Struct (object):
 		else:
 			return token.count
 
-	def _decode_float(self, data, exponentsize, mantissasize):
+	def _decode_float(self, data, exponentsize, mantissasize, byteorder):
 		maxed_exponent = (1 << exponentsize) - 1
 
-		encoded = int.from_bytes(data, byteorder=self.byteorder, signed=False)
+		encoded = int.from_bytes(data, byteorder=byteorder, signed=False)
 		base_exponent = (encoded >> mantissasize) & maxed_exponent
 		mantissa = encoded & ((1 << mantissasize) - 1)
 		sign = -1 if (encoded >> (exponentsize + mantissasize)) else 1
@@ -678,7 +701,7 @@ class Struct (object):
 		return sign, exponent, mantissa
 
 
-	def _unpack_file(self, data, tokens, refdata):
+	def _unpack_file(self, data, tokens, refdata, byteorder):
 		alignref = data.tell()
 		unpacked = []
 
@@ -690,20 +713,20 @@ class Struct (object):
 				if token.type == "(":
 					multigroup = []
 					for i in range(count):
-						subgroup = self._unpack_file(data, token.content, refdata)
+						subgroup = self._unpack_file(data, token.content, refdata, byteorder)
 						multigroup.extend(subgroup)
 					unpacked.append(multigroup)
 				elif token.type == "[":
 					sublist = []
 					for i in range(count):
-						subgroup = self._unpack_file(data, token.content, refdata)
+						subgroup = self._unpack_file(data, token.content, refdata, byteorder)
 						sublist.append(subgroup)
 					unpacked.append(sublist)
 				elif token.type == "{":
 					sublist = []
 					while True:
 						try:
-							subgroup = self._unpack_file(data, token.content, refdata)
+							subgroup = self._unpack_file(data, token.content, refdata, byteorder)
 						except DataError:
 							break
 						sublist.append(subgroup)
@@ -722,13 +745,13 @@ class Struct (object):
 					signed, size = _INTEGER_ELEMENTS[token.type]
 					groupdata = _read(data, size * count)
 					for i in range(count):
-						unpacked.append(int.from_bytes(groupdata[i*size: (i+1)*size], byteorder=self.byteorder, signed=signed))
+						unpacked.append(int.from_bytes(groupdata[i*size: (i+1)*size], byteorder=byteorder, signed=signed))
 				elif token.type in _FLOAT_ELEMENTS:
 					size, exponentsize, mantissasize, bias = _FLOAT_ELEMENTS[token.type]
 					groupdata = _read(data, size * count)
 					for i in range(count):
 						elementdata = groupdata[i*size: (i+1)*size]
-						decoded = self._decode_float(elementdata, exponentsize, mantissasize)
+						decoded = self._decode_float(elementdata, exponentsize, mantissasize, byteorder)
 						unpacked.append(decoded)
 				elif token.type == "x":
 					data.seek(count, 1)
@@ -758,7 +781,7 @@ class Struct (object):
 
 		return unpacked
 
-	def _pack_file(self, out, data, refdata, tokens=None):
+	def _pack_file(self, out, data, refdata, byteorder, tokens=None):
 		if tokens is None:
 			tokens = self.tokens
 		position = 0
@@ -770,15 +793,15 @@ class Struct (object):
 				if token.type == "(":
 					grouppos = 0
 					for _ in range(count):
-						grouppos += self._pack_file(out, data[position][grouppos:], refdata, token.content)
+						grouppos += self._pack_file(out, data[position][grouppos:], refdata, byteorder, token.content)
 					position += 1
 				elif token.type == "[":
 					for _, group in zip(range(count), data[position]):
-						self._pack_file(out, group, refdata, token.content)
+						self._pack_file(out, group, refdata, byteorder, token.content)
 					position += 1
 				elif token.type == "{":
 					for group in data[position]:
-						self._pack_file(out, group, refdata, token.content)
+						self._pack_file(out, group, refdata, byteorder, token.content)
 					position += 1
 				# Control
 				elif token.type == "|":
@@ -795,7 +818,7 @@ class Struct (object):
 					elementdata = b""
 					try:
 						for _ in range(count):
-							elementdata += data[position].to_bytes(size, byteorder=self.byteorder, signed=signed)
+							elementdata += data[position].to_bytes(size, byteorder=byteorder, signed=signed)
 							position += 1
 					except AttributeError as exc:
 						raise TypeError(_error_context("Wrong type for format '" + token.type + "', the given object must be an integer or have a .to_bytes() method similar to int", self.format, token.position))
@@ -809,7 +832,7 @@ class Struct (object):
 
 						sign, exponent, mantissa = self._build_float(token, decoded, exponentsize, mantissasize)
 						encoded = (((sign << exponentsize) | exponent) << mantissasize) | mantissa
-						elementdata += encoded.to_bytes(size, byteorder=self.byteorder, signed=False)
+						elementdata += encoded.to_bytes(size, byteorder=byteorder, signed=False)
 					out.write(elementdata)
 				elif token.type == "x":
 					out.write(b"\x00" * count)

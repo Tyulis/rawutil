@@ -692,6 +692,28 @@ class StructureTestCase (unittest.TestCase):
 		self.assertSequenceEqual(rawutil.unpack("<BH", b"\x01\x02\x03"), [1, 0x302])
 		self.assertSequenceEqual(rawutil.unpack("2(B) (B)", b"\x01\x02\x03"), [[1, 2], [3]])
 		self.assertSequenceEqual(rawutil.unpack("2s 4s", b"xxyyyy"), [b"xx", b"yyyy"])
+	
+	# Internally, all floats go through the same path, all integers go through the same path
+	force_byteorder_cases = {
+		#     value               big endian
+		"H": (0xFF00,             b"\xFF\x00"),
+		"f": ((1+100/2**23)/1024, b"\x3a\x80\x00\x64")
+	}
+
+	def test_force_byteorder(self):
+		for format, (value, big_endian_data) in self.force_byteorder_cases.items():
+			structure = rawutil.Struct(format)
+			little_endian_data = bytes(reversed(big_endian_data))
+			
+			for correct_byteorder in ("big", "little"):
+				wrong_byteorder = "big" if correct_byteorder == "little" else "little"
+				correct_data = big_endian_data if correct_byteorder == "big" else little_endian_data
+
+				with self.subTest(structure=format, correct_byteorder=correct_byteorder):
+					structure.setbyteorder(wrong_byteorder)
+
+					self.assertEqual(structure.unpack(correct_data, byteorder=correct_byteorder)[0], value)
+					self.assertEqual(structure.pack(value, byteorder=correct_byteorder), correct_data)
 
 
 def run_timings():
@@ -765,5 +787,8 @@ def time_struct_comparison():
 	print("Struct.pack   | %7.4f | %7.4f |" % (rawutil_pack_struct, struct_pack_struct))
 
 if __name__ == "__main__":
-	run_timings()
+	if "--timings" in sys.argv:
+		run_timings()
+		sys.argv.remove("--timings")
+	
 	unittest.main()
