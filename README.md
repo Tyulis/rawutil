@@ -5,15 +5,15 @@
 ## Introduction
 
 Rawutil is a module aimed at reading and writing binary data in python in the same way as the built-in `struct` module, but with more features.
-The rawutil's interface is thus compatible with `struct`, with a few small exceptions, and many things added.
+rawutil's interface is thus compatible with `struct`, with a few small exceptions, and many things added.
 It does not have any non-builtin dependency.
 
-### What is already in struct
+### What’s already in struct
 
 - Unpack and pack fixed structures from/to bytes (`pack`, `pack_into`, `unpack`, `unpack_from`, `iter_unpack`, `calcsize`)
 - `Struct` objects that allow to parse one and for all a structure that may be used several times
 
-### What is different compared to struct
+### What’s different compared to struct
 
 - Some rarely-used format characters are not in rawutil (`N`, `P` and `p` are not available, `n` is used for a different purpose)
 - There is no consideration for native size and alignment, thus the `@` characters simply applies system byte order with standard sizes and no alignment, just like `=`
@@ -173,16 +173,15 @@ calcsize(structure, refdata=())
 
 Returns the size of the data represented by the given `structure`.
 
-This function is kept to ensure compatibility with `struct`.
-However, rawutil structure are not always of a fixed length, as they use internal references and variable length formats.
-Hence `calcsize` only works on fixed-length structures, thus structures that only use :
+Rawutil structures are not always of a fixed length, as they use internal references and variable length formats.
+Hence `calcsize` only works on fixed-length structures, that only use :
 
 - Fixed-length format characters (basic types with set repeat count)
 - External references (`#0` type references, if you provide their value in `refdata`)
 - Iterators with fixed number of repeats (`2(…)` or `5[…]` will work)
 - Alignments (structures with `a` and `|`). As long as everything else is fixed, alignments are too.
 
-Trying to compute the size of a structure that includes any of those elements will raise an `FormatError` (basically, anything that depends on the data to read / write) :
+Trying to compute the size of a structure that includes any of the following will raise a `FormatError` (basically, anything that depends on the data to read / write) :
 
 - Variable-length format characters (namely `n` and `$`)
 - `{…}` iterators, as they depend on the amount of data remaining.
@@ -195,12 +194,23 @@ Struct(format, names=None, safe_references=True)
 ```
 
 Struct objects allow to pre-parse format strings once and for all.
-Indeed, using only format strings will force to parse them every time you use them.
+Using only format strings will force to parse them every time you use them.
 If a structure is used more than once, it will thus save time to wrap it in a Struct object.
 You can also set the element names once, they will then be used by default every time you unpack data with that structure.
 Any function that accepts a format string also accepts Struct objects.
-A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient namedtuple. The `safe_references`, when set to `False`, allows some seemingly unsafe but sometimes desirable behaviours described in the *References* section.
-It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
+
+A Struct object is initialized with a format string, and can take a `names` parameter that may be a namedtuple or a list of names, that allows to return data unpacked with this structure in a more convenient `namedtuple`.  It works exactly the same as the `names` parameter of `unpack` and its variants, but without having to specify it each time.
+The namedtuple type can also be retrieved from the `structure.names` attributes, and can be used to clarify packed values :
+
+```python
+>>> my_structure = rawutil.Struct("4s I", names=("magic", "size"))
+>>> data = my_structure.names(magic=b"1234", size=64)
+>>> my_structure.pack(*data)
+b'1234@\x00\x00\x00'
+```
+
+The `safe_references` parameter, when set to `False`, allows some seemingly unsafe but sometimes desirable behaviours described in the *References* section.
+
 You can retrieve the byte order with the `byteorder` attribute (can be `"little"` or `"big"`), and the format string (without byte order mark) with the `format` attribute.
 You can also tell whether the structure has an assigned byte order with the `forcebyteorder` attribute.
 
@@ -233,6 +243,15 @@ As you can see, the references are automatically fixed : all absolute references
 External references are fixed too, and supposed to be in sequence in `refdata`.
 
 Note that if the added structures have different byte order marks, the resulting structure will always retain the byte order of the left operand.
+
+### Utility functions
+
+```python
+padding_to_multiple(initial_size, alignment)
+```
+
+Compute the padding to add to go from `initial_size` to the next multiple of `alignment`
+Ex. align 13 to the next multiple of 4 -> return 3 (13 + 3 = 16)
 
 ### Exceptions
 
