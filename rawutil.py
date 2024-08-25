@@ -97,7 +97,7 @@ import builtins
 import binascii
 import collections
 
-__version__ = "2.8.0"
+__version__ = "2.8.1"
 
 ENDIANNAMES = {
 	"=": sys.byteorder,
@@ -135,6 +135,11 @@ def hextobytes(hx):
 	if type(hx) == str:
 		hx = hx.encode('ascii')
 	return binascii.unhexlify(hx)
+
+def padding_to_multiple(initial_size, alignment):
+	"""Compute the padding to add to go from `initial_size` to the next multiple of `alignment`
+	Ex. align 13 to the next multiple of 4 -> return 3 (13 + 3 = 16)"""
+	return alignment - (initial_size % alignment or alignment)
 
 
 class FormatError (Exception):
@@ -211,7 +216,7 @@ _STRUCTURE_CHARACTERS = {  # (size in bytes or None if indeterminate, referencab
 	"i": (4, True, True), "I": (4, True, True), "l": (4, True, True), "L": (4, True, True),
 	"q": (8, True, True), "Q": (8, True, True), "e": (2, False, True), "f": (4, False, True),
 	"d": (8, False, True), "F": (16, False, True), "c": (1, False, True), "s": (1, False, False),
-	"n": (None, False, True), "X": (1, False, False), "|": (0, False, None), "a": (-1, False, False),
+	"n": (None, False, True), "X": (1, False, False), "|": (0, False, None), "a": (None, False, False),
 	"x": (1, False, True), "$": (None, False, False),
 	"(": (None, False, False), "[": (None, False, False), "{": (None, False, False),
 }
@@ -458,14 +463,12 @@ class Struct (object):
 				raise FormatError(_error_context("Impossible to compute the size of a structure with {} iterators", self.format, token.position))
 			elif token.type == "|":
 				alignref = size
+			elif token.type == "a":
+				size += padding_to_multiple(size - alignref, count)
 			else:
 				elementsize, referencable, directcount = _STRUCTURE_CHARACTERS[token.type]
 				if elementsize is None:
 					raise FormatError(_error_context("Impossible to compute the size of a structure with '" + token.type + "' elements", self.format, token.position))
-				elif elementsize == -1:
-					refdistance = size - alignref
-					padding = count - (refdistance % count or count)
-					size += padding
 				else:
 					size += count * elementsize
 		return size
@@ -735,8 +738,7 @@ class Struct (object):
 				elif token.type == "|":
 					alignref = data.tell()
 				elif token.type == "a":
-					refdistance = data.tell() - alignref
-					padding = count - (refdistance % count or count)
+					padding = padding_to_multiple(data.tell() - alignref, count)
 					data.seek(padding, 1)
 				elif token.type == "$":
 					unpacked.append(_read(data))
@@ -807,8 +809,7 @@ class Struct (object):
 				elif token.type == "|":
 					alignref = out.tell()
 				elif token.type == "a":
-					refdistance = out.tell() - alignref
-					padding = count - (refdistance % count or count)
+					padding = padding_to_multiple(out.tell() - alignref, count)
 					out.write(b"\x00" * padding)
 				elif token.type == "$":
 					out.write(data[position])
