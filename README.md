@@ -34,7 +34,7 @@ Rawutil exports more or less the same interface as `struct`. In all those functi
 ### unpack
 
 ```python
-unpack(structure, data, names=None, refdata=())
+unpack(structure, data, names=None, refdata=(), byteorder=None)
 ```
 Unpacks the given `data` according to the `structure`, and returns the unpacked values as a list.
 
@@ -42,6 +42,7 @@ Unpacks the given `data` according to the `structure`, and returns the unpacked 
 - `data` may be a bytes-like or a file-like object. If it is a file-like object, the data will be unpacked starting from the current position in the file, and will leave the cursor at the end of the data that has been read (effectively reading the data to unpack from the file).
 - `names` may be a list of field names for a `namedtuple`, or a callable that takes all unpacked elements in order as arguments, like a `namedtuple` or a `dataclass`.
 - `refdata` may be used to easily input external data into the structure, as `#n` references. This will be described in the References part below
+- `byteorder` ("little" / "big") may be used to force the byteorder over the one defined in the format string
 
 Unlike `struct`, this function does not raises any error if the data is larger than the structure expected size.
 
@@ -104,11 +105,14 @@ j k l
 ### pack
 
 ```python
-pack(self, *data, refdata=())
+pack(self, *data, refdata=(), byteorder=None, padding_byte=0x00)
 ```
 
 Packs the given `data` in the binary format defined by `structure`, and returns the packed data as a `bytes` object.
-`refdata` is still there to insert external data in the structure using the `#n` references, and is a named argument only.
+
+- `refdata` is still there to insert external data in the structure using the `#n` references, and is a named argument only.
+- `byteorder` ("little" / "big") may be used to force the byteorder over the one defined in the format string
+- `padding_byte` is the value of the padding bytes inserted by `"x"` and `"a"` format characters
 
 Examples :
 ```python
@@ -123,13 +127,15 @@ b"\nd\x00\x00\x03\xe8\x00\x00'\x10\x00\x01\x86\xa0"
 ### pack_into
 
 ```python
-pack_into(structure, buffer, offset, *data, refdata=())
+pack_into(structure, buffer, offset, *data, refdata=(), byteorder=None)
 ```
 
 Packs the given `data` into the given `buffer` at the given `offset` according to the given `structure`. Refdata still has the same usage as everywhere else.
 
 - `buffer` must be a mutable bytes-like object (typically a `bytearray`). The data will be written directly into it at the given position
 - `offset` specifies the position to write the data to. It is a required argument.
+- `byteorder` ("little" / "big") may be used to force the byteorder over the one defined in the format string
+- `padding_byte` is the value of the padding bytes inserted by `"x"` and `"a"` format characters
 
 Examples :
 
@@ -143,13 +149,15 @@ bytearray(b'ABCDEFGH')
 ### pack_file
 
 ```python
-pack_file(structure, file, *data, position=None, refdata=())
+pack_file(structure, file, *data, position=None, refdata=(), byteorder=None)
 ```
 
 Packs the given `data` into the given `file` according to the given `structure`. `refdata` is still there for the external references data.
 
 - `file` can be any binary writable file-like object.
 - `position` can be set to pack the data at a specific position in the file. If it is left to `None`, the data will be packed at the current position in the file. In either case, the cursor will end up at the end of the packed data.
+- `byteorder` ("little" / "big") may be used to force the byteorder over the one defined in the format string
+- `padding_byte` is the value of the padding bytes inserted by `"x"` and `"a"` format characters
 
 Examples :
 
@@ -218,9 +226,9 @@ For convenience, Struct also defines the module-level functions, for the structu
 unpack(self, data, names=None, refdata=(), byteorder=None)
 unpack_from(self, data, offset=None, names=None, refdata=(), getptr=False, byteorder=None)
 iter_unpack(self, data, names=None, refdata=(), byteorder=None)
-pack(self, *data, refdata=(), byteorder=None)
-pack_into(self, buffer, offset, *data, refdata=(), byteorder=None)
-pack_file(self, file, *data, position=None, refdata=(), byteorder=None)
+pack(self, *data, refdata=(), byteorder=None, padding_byte=0x00)
+pack_into(self, buffer, offset, *data, refdata=(), byteorder=None, padding_byte=0x00)
+pack_file(self, file, *data, position=None, refdata=(), byteorder=None, padding_byte=0x00)
 calcsize(self, refdata=None, tokens=None)
 ```
 
