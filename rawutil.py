@@ -363,13 +363,14 @@ class Struct (object):
 		else:
 			return unpacked
 
-	def pack(self, *data, refdata=(), byteorder=None):
+	def pack(self, *data, refdata=(), byteorder=None, padding_byte=0x00):
 		"""Pack data as bytes according to this structure
 
 		- data : all elements to pack, in order
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
 		- byteorder : Force the byte order for this action only ("little" / "big")
+		- padding_byte : Value to use for padding bytes, defaults to 0
 		"""
 		if byteorder is None:
 			byteorder = self.byteorder
@@ -377,11 +378,11 @@ class Struct (object):
 		data = list(data)
 
 		out = io.BytesIO()
-		self._pack_file(out, data, refdata, byteorder)
+		self._pack_file(out, self.tokens, data, refdata, byteorder, padding_byte)
 		out.seek(0)
 		return out.read()
 
-	def pack_into(self, buffer, offset, *data, refdata=(), byteorder=None):
+	def pack_into(self, buffer, offset, *data, refdata=(), byteorder=None, padding_byte=0x00):
 		"""Pack data into an existing buffer at the given position
 
 		- buffer : writable bytes-like object (e.g. a bytearray), where the data
@@ -391,17 +392,18 @@ class Struct (object):
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
 		- byteorder : Force the byte order for this action only ("little" / "big")
+		- padding_byte : Value to use for padding bytes, defaults to 0
 		"""
 		if byteorder is None:
 			byteorder = self.byteorder
 
 		out = io.BytesIO()
-		self._pack_file(out, data, refdata, byteorder)
+		self._pack_file(out, self.tokens, data, refdata, byteorder, padding_byte)
 		out.seek(0)
 		packed = out.read()
 		buffer[offset: offset + len(packed)] = packed
 
-	def pack_file(self, file, *data, position=None, refdata=(), byteorder=None):
+	def pack_file(self, file, *data, position=None, refdata=(), byteorder=None, padding_byte=0x00):
 		"""Pack data into a file-like object
 
 		- file : writable binary file-like object, where the data will be
@@ -412,13 +414,14 @@ class Struct (object):
 		- refdata : list of values that are referenced by external references in
 		        the structure (e.g. `#1` uses refdata[1] as a count)
 		- byteorder : Force the byte order for this action only ("little" / "big")
+		- padding_byte : Value to use for padding bytes, defaults to 0
 		"""
 		if byteorder is None:
 			byteorder = self.byteorder
 
 		if position is not None:
 			file.seek(position)
-		self._pack_file(file, data, refdata, byteorder)
+		self._pack_file(file, self.tokens, data, refdata, byteorder, padding_byte)
 
 	def iter_unpack(self, data, names=None, refdata=(), byteorder=None):
 		"""Create an iterator that successively unpacks according to this
@@ -799,9 +802,7 @@ class Struct (object):
 
 		return unpacked
 
-	def _pack_file(self, out, data, refdata, byteorder, tokens=None):
-		if tokens is None:
-			tokens = self.tokens
+	def _pack_file(self, out, tokens, data, refdata, byteorder, padding_byte):
 		position = 0
 		alignref = out.tell()
 		for token in tokens:
@@ -812,22 +813,22 @@ class Struct (object):
 				if token.type == "(":
 					grouppos = 0
 					for _ in range(count):
-						grouppos += self._pack_file(out, data[position][grouppos:], refdata, byteorder, token.content)
+						grouppos += self._pack_file(out, token.content, data[position][grouppos:], refdata, byteorder, padding_byte)
 					position += 1
 				elif token.type == "[":
 					for _, group in zip(range(count), data[position]):
-						self._pack_file(out, group, refdata, byteorder, token.content)
+						self._pack_file(out, token.content, group, refdata, byteorder, padding_byte)
 					position += 1
 				elif token.type == "{":
 					for group in data[position]:
-						self._pack_file(out, group, refdata, byteorder, token.content)
+						self._pack_file(out, token.content, group, refdata, byteorder, padding_byte)
 					position += 1
 				# Control
 				elif token.type == "|":
 					alignref = out.tell()
 				elif token.type == "a":
 					padding = padding_to_multiple(out.tell() - alignref, count)
-					out.write(b"\x00" * padding)
+					out.write(bytes([padding_byte] * padding))
 				elif token.type == "$":
 					out.write(data[position])
 					position += 1
@@ -851,7 +852,7 @@ class Struct (object):
 						elementdata += encoded.to_bytes(character.fixed_size, byteorder=byteorder, signed=False)
 					out.write(elementdata)
 				elif token.type == "x":
-					out.write(b"\x00" * count)
+					out.write(bytes([padding_byte] * count))
 				elif token.type == "?":
 					elementdata = bytes(data[position: position + count])
 					out.write(elementdata)
@@ -1174,7 +1175,7 @@ class Struct (object):
 		return self.__repr__()
 
 
-def unpack(structure, data, names=None, refdata=()):
+def unpack(structure, data, names=None, refdata=(), byteorder=None):
 	"""Unpack data from the given source
 
 	- structure : format string or Struct object
@@ -1188,11 +1189,12 @@ def unpack(structure, data, names=None, refdata=()):
 			arguments (for instance a `namedtuple` type or a `dataclass`)
 	- refdata : list of values that are referenced by external references in
 			the structure (e.g. `#1` uses refdata[0] as a count)
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.unpack(data, names, refdata)
+	return stct.unpack(data, names=names, refdata=refdata, byteorder=byteorder)
 
-def unpack_from(structure, data, offset=None, names=None, refdata=(), getptr=False):
+def unpack_from(structure, data, offset=None, names=None, refdata=(), getptr=False, byteorder=None):
 	"""Unpack data from the given source at the given position
 
 	- structure : format string or Struct object
@@ -1211,11 +1213,12 @@ def unpack_from(structure, data, offset=None, names=None, refdata=(), getptr=Fal
 			the structure (e.g. `#1` uses refdata[1] as a count)
 	- getptr : If set to True, also returns the position immediately after
 			the unpacked data
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.unpack_from(data, offset, names, refdata, getptr)
+	return stct.unpack_from(data, offset, names=names, refdata=refdata, getptr=getptr, byteorder=byteorder)
 
-def iter_unpack(structure, data, names=None, refdata=()):
+def iter_unpack(structure, data, names=None, refdata=(), byteorder=None):
 	"""Create an iterator that successively unpacks according to the
 	structure at each iteration
 
@@ -1230,22 +1233,25 @@ def iter_unpack(structure, data, names=None, refdata=()):
 			arguments (for instance a `namedtuple` type or a `dataclass`)
 	- refdata : list of values that are referenced by external references in
 			the structure (e.g. `#1` uses refdata[0] as a count)
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.iter_unpack(data, names, refdata)
+	return stct.iter_unpack(data, names, refdata=refdata, byteorder=byteorder)
 
-def pack(structure, *data, refdata=()):
+def pack(structure, *data, refdata=(), byteorder=None, padding_byte=0x00):
 	"""Pack data as bytes according to this structure
 
 	- structure : format string or Struct object
 	- data : all elements to pack, in order
 	- refdata : list of values that are referenced by external references in
 			the structure (e.g. `#1` uses refdata[1] as a count)
+	- padding_byte : Value to use for padding bytes, defaults to 0
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.pack(*data, refdata=refdata)
+	return stct.pack(*data, refdata=refdata, byteorder=byteorder, padding_byte=padding_byte)
 
-def pack_into(structure, buffer, offset, *data, refdata=()):
+def pack_into(structure, buffer, offset, *data, refdata=(), byteorder=None, padding_byte=0x00):
 	"""Pack data into an existing buffer at the given position
 
 	- structure : format string or Struct object
@@ -1255,11 +1261,13 @@ def pack_into(structure, buffer, offset, *data, refdata=()):
 	- data : all elements to pack, in order
 	- refdata : list of values that are referenced by external references in
 			the structure (e.g. `#1` uses refdata[1] as a count)
+	- padding_byte : Value to use for padding bytes, defaults to 0
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.pack_into(buffer, offset, *data, refdata=refdata)
+	return stct.pack_into(buffer, offset, *data, refdata=refdata, byteorder=byteorder, padding_byte=padding_byte)
 
-def pack_file(structure, file, *data, position=None, refdata=()):
+def pack_file(structure, file, *data, position=None, refdata=(), byteorder=None, padding_byte=0x00):
 	"""Pack data into a file-like object
 
 	- structure : format string or Struct object
@@ -1270,9 +1278,11 @@ def pack_file(structure, file, *data, position=None, refdata=()):
 			Defaults to the current position
 	- refdata : list of values that are referenced by external references in
 			the structure (e.g. `#1` uses refdata[1] as a count)
+	- padding_byte : Value to use for padding bytes, defaults to 0
+	- byteorder : Force the byte order over the one defined by the format string ("little" / "big")
 	"""
 	stct = Struct(structure)
-	return stct.pack_file(file, *data, position=position, refdata=refdata)
+	return stct.pack_file(file, *data, position=position, refdata=refdata, byteorder=byteorder, padding_byte=padding_byte)
 
 def calcsize(structure, refdata=()):
 	"""Calculate the size in bytes of the data represented by this structure
