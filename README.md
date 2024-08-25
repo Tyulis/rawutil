@@ -110,8 +110,6 @@ pack(self, *data, refdata=())
 Packs the given `data` in the binary format defined by `structure`, and returns the packed data as a `bytes` object.
 `refdata` is still there to insert external data in the structure using the `#n` references, and is a named argument only.
 
-Note that if the last element of `data` is a writable file-like object, the data will be written into it instead of being returned. This behaviour is deprecated and kept only for backwards-compatibility, to pack into a file you should rather use `pack_file`.
-
 Examples :
 ```python
 >>> pack("<2In", 10, 100, b"String")

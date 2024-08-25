@@ -479,16 +479,17 @@ class StructureTestCase (unittest.TestCase):
 			structobj = rawutil.Struct("B #0{2B}")
 
 	calcsize_simple = {
-		"b": 1, "B": 1, "h": 2, "H": 2, "u": 3, "U": 3,
-		"i": 4, "I": 4, "l": 4, "L": 4, "q": 8, "Q": 8,
-		"e": 2, "f": 4, "d": 8, "F": 16, "?": 1, "x": 1,
-		"c": 1,
+		"b": ([0], 1), "B": ([0], 1), "h": ([0], 2), "H": ([0], 2), "u": ([0], 3), "U": ([0], 3),
+		"i": ([0], 4), "I": ([0], 4), "l": ([0], 4), "L": ([0], 4), "q": ([0], 8), "Q": ([0], 8),
+		"e": ([0], 2), "f": ([0], 4), "d": ([0], 8), "F": ([0], 16), "?": ([True], 1), "x": ([], 1),
+		"c": ([b"a"], 1),
 	}
 
 	calcsize_complex = {
-		"4s": 4, "5X": 5,
-		"4(bBhHuUiIlLqQefdF?xc) 3a": 309,
-		"3(HB)": 9, "I 4[3B|2B 8a]": 48,
+		"4s": (b"ABCD", 4), "5X": ("AABBCCDDEE", 5),
+		"4(bBhHuUiIlLqQefdF?xc) 3a": ([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False, b"0"] * 4], 309),
+		"3(HB)": ([[0, 0, 0, 0, 0, 0]], 9),
+		"I 4[3B|2B 8a]": ([0, [[0, 0, 0, 0, 0]] * 4], 48),
 	}
 
 	calcsize_error = [
@@ -497,7 +498,7 @@ class StructureTestCase (unittest.TestCase):
 	]
 
 	def test_calcsize_simple(self):
-		for structure, size in self.calcsize_simple.items():
+		for structure, (_, size) in self.calcsize_simple.items():
 			for byteorder in rawutil.ENDIANNAMES:
 				for count in ("0", "1", "", "4"):
 					with self.subTest(structure=structure, byteorder=byteorder, count=count):
@@ -505,7 +506,7 @@ class StructureTestCase (unittest.TestCase):
 						self.assertEqual(rawutil.calcsize(byteorder + count + structure), result)
 
 	def test_calcsize_complex(self):
-		for structure, size in self.calcsize_complex.items():
+		for structure, (_, size) in self.calcsize_complex.items():
 			with self.subTest(structure=structure):
 				self.assertEqual(rawutil.calcsize(structure), size)
 
@@ -518,7 +519,39 @@ class StructureTestCase (unittest.TestCase):
 	def test_calcsize_refdata(self):
 		structure = "#0I #1(#2I) #3[#4I]"
 		refdata = [2, 3, 5, 1, 0]
+		input_data = [0, 0, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], []]
 		self.assertEqual(rawutil.calcsize(structure, refdata=refdata), 68)
+		self.assertEqual(rawutil.packed_size(structure, *input_data, refdata=refdata), 68)
+		
+
+	packed_size_cases = {
+		"3B /0(B) /1(H) /2[2I]": ([3, 0, 2, [0, 0, 0], [[0, 0], [0, 0]]], 37),
+		"2B /p1(B)": ([0, 4, [0, 0, 0, 0]], 6),
+		"2B /p1(B) 2B /p2(B)": ([0, 4, [0, 0, 0, 0], 2, 0, [0, 0]], 10),
+		"2B /p1(B) 4a": ([0, 4, [0, 0, 0, 0]], 8),
+		"2B | /p1(B) 6a": ([0, 4, [0, 0, 0, 0]], 8),
+		"2B /p1(B 4a)":  ([0, 4, [0, 0, 0, 0]], 18),
+		"2B /p1(B 2x 4a)":  ([0, 4, [0, 0, 0, 0]], 18),
+		"2B /p1(B | B 4a)": ([0, 4, [0, 0, 0, 0, 0, 0, 0, 0]], 22),
+		"I {2I}": ([0, [[0, 0], [1, 1], [2, 2], [3, 3]]], 36),
+		"I $": ([0, b"999999999"], 13),
+		"4n": ([b"55555", b"7777777", b"", b"1"], 6 + 8 + 1 + 2),
+	}
+	
+	def test_packed_size_equivalent_calcsize(self):
+		for structure, (case_data, size) in self.calcsize_simple.items():
+			for byteorder in rawutil.ENDIANNAMES:
+				for count_format in ("0", "1", "", "4"):
+					count = int(count_format) if len(count_format) > 0 else 1
+					with self.subTest(structure=structure, byteorder=byteorder, count=count_format):
+						result = count * size
+						input_data = count * case_data
+						self.assertEqual(rawutil.packed_size(byteorder + count_format + structure, *input_data), result)
+	
+	def test_packed_size(self):
+		for structure, (input_data, size) in self.calcsize_complex.items():
+			with self.subTest(structure=structure):
+				self.assertEqual(rawutil.packed_size(structure, *input_data), size)
 
 	def test_names(self):
 		format = "B 'val1'  B 'val2'  B 'val3'"
@@ -726,7 +759,7 @@ def run_timings():
 
 def time_parsing():
 	number = 200000
-	format = "<bB hH 'random comment' 5U6u /0Ii/p1l LLLLLLLL (QQ) 5(qq) /0(5e|1e 4a) Q/p1[fdF16a] {5I 1989F /0n /1s /2c /3[6X 4x]}"
+	format = "<bB hH 'random comment' 5U6u /0Ii/p1l LLLLLLLL (QQ) 5(qq) /0(5e|1e 4a) Q/p1[fdF16a] {5I 1989F /0n /1s /2c /3[3(6X I /p1(n)) 4x]}"
 	duration = timeit.timeit(stmt="rawutil.Struct(format)", globals=globals() | locals(), number=number)
 	print("Parsing %d times : %.4f seconds" % (number, duration))
 
@@ -772,19 +805,25 @@ def time_struct_comparison():
 	packed = b"TESTaaaabbbbccccddddEEEEEEEEFFFFFFFFGGGGGGGGHHHHHHHHthis is a test !....,,,,;;;;********"
 	unpacked = [b"TEST", 0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC, 0xDDDDDDDD, 0xEEEEEEEEEEEEEEEE, 0xFFFFFFFFFFFFFFFF, 0x1111111111111111, 0x2222222222222222, b"this is a test !", 0.574, 14.6663, 6733315.4, 3.141592629]
 
-	print("              | rawutil |  struct |")
+	print("                | rawutil |  struct |")
 	rawutil_unpack_nostruct = timeit.timeit(stmt="rawutil.unpack(format, packed)", globals=globals() | locals(), number=number)
 	struct_unpack_nostruct = timeit.timeit(stmt="struct.unpack(format, packed)", globals=globals() | locals(), number=number)
-	print("module.unpack | %7.4f | %7.4f |" % (rawutil_unpack_nostruct, struct_unpack_nostruct))
+	print("module.unpack   | %7.4f | %7.4f |" % (rawutil_unpack_nostruct, struct_unpack_nostruct))
 	rawutil_unpack_struct = timeit.timeit(stmt="rawutil_struct.unpack(packed)", globals=globals() | locals(), number=number)
 	struct_unpack_struct = timeit.timeit(stmt="struct_struct.unpack(packed)", globals=globals() | locals(), number=number)
-	print("Struct.unpack | %7.4f | %7.4f |" % (rawutil_unpack_struct, struct_unpack_struct))
+	print("Struct.unpack   | %7.4f | %7.4f |" % (rawutil_unpack_struct, struct_unpack_struct))
 	rawutil_pack_nostruct = timeit.timeit(stmt="rawutil.pack(format, *unpacked)", globals=globals() | locals(), number=number)
 	struct_pack_nostruct = timeit.timeit(stmt="struct.pack(format, *unpacked)", globals=globals() | locals(), number=number)
-	print("module.pack   | %7.4f | %7.4f |" % (rawutil_pack_nostruct, struct_pack_nostruct))
+	print("module.pack     | %7.4f | %7.4f |" % (rawutil_pack_nostruct, struct_pack_nostruct))
 	rawutil_pack_struct = timeit.timeit(stmt="rawutil_struct.pack(*unpacked)", globals=globals() | locals(), number=number)
 	struct_pack_struct = timeit.timeit(stmt="struct_struct.pack(*unpacked)", globals=globals() | locals(), number=number)	
-	print("Struct.pack   | %7.4f | %7.4f |" % (rawutil_pack_struct, struct_pack_struct))
+	print("Struct.pack     | %7.4f | %7.4f |" % (rawutil_pack_struct, struct_pack_struct))
+	rawutil_calcsize_nostruct = timeit.timeit(stmt="rawutil.calcsize(format)", globals=globals() | locals(), number=number)
+	struct_calcsize_nostruct = timeit.timeit(stmt="struct.calcsize(format)", globals=globals() | locals(), number=number)
+	print("module.calcsize | %7.4f | %7.4f |" % (rawutil_calcsize_nostruct, struct_calcsize_nostruct))
+	rawutil_calcsize_struct = timeit.timeit(stmt="rawutil_struct.calcsize()", globals=globals() | locals(), number=number)
+	struct_calcsize_struct = timeit.timeit(stmt="struct_struct.size", globals=globals() | locals(), number=number)
+	print("Struct.calcsize | %7.4f | %7.4f |" % (rawutil_calcsize_struct, struct_calcsize_struct))
 
 if __name__ == "__main__":
 	if "--timings" in sys.argv:
