@@ -525,7 +525,7 @@ class StructureTestCase (unittest.TestCase):
 		
 
 	packed_size_cases = {
-		"3B /0(B) /1(H) /2[2I]": ([3, 0, 2, [0, 0, 0], [[0, 0], [0, 0]]], 37),
+		"3B /0(B) /1(H) /2[2I]": ([3, 0, 2, [0, 0, 0], [], [[0, 0], [0, 0]]], 22),
 		"2B /p1(B)": ([0, 4, [0, 0, 0, 0]], 6),
 		"2B /p1(B) 2B /p2(B)": ([0, 4, [0, 0, 0, 0], 2, 0, [0, 0]], 10),
 		"2B /p1(B) 4a": ([0, 4, [0, 0, 0, 0]], 8),
@@ -533,12 +533,13 @@ class StructureTestCase (unittest.TestCase):
 		"2B /p1(B 4a)":  ([0, 4, [0, 0, 0, 0]], 18),
 		"2B /p1(B 2x 4a)":  ([0, 4, [0, 0, 0, 0]], 18),
 		"2B /p1(B | B 4a)": ([0, 4, [0, 0, 0, 0, 0, 0, 0, 0]], 22),
+		"II H 2x /2(I)": ([0, 0, 2, [0, 112]], 20),
 		"I {2I}": ([0, [[0, 0], [1, 1], [2, 2], [3, 3]]], 36),
 		"I $": ([0, b"999999999"], 13),
 		"4n": ([b"55555", b"7777777", b"", b"1"], 6 + 8 + 1 + 2),
 	}
 	
-	def test_packed_size_equivalent_calcsize(self):
+	def test_packed_size_equivalent_calcsize_simple(self):
 		for structure, (case_data, size) in self.calcsize_simple.items():
 			for byteorder in rawutil.ENDIANNAMES:
 				for count_format in ("0", "1", "", "4"):
@@ -548,10 +549,17 @@ class StructureTestCase (unittest.TestCase):
 						input_data = count * case_data
 						self.assertEqual(rawutil.packed_size(byteorder + count_format + structure, *input_data), result)
 	
-	def test_packed_size(self):
+	def test_packed_size_equivalent_calcsize_complex(self):
 		for structure, (input_data, size) in self.calcsize_complex.items():
 			with self.subTest(structure=structure):
 				self.assertEqual(rawutil.packed_size(structure, *input_data), size)
+	
+	def test_packed_size(self):
+		for structure, (input_data, size) in self.packed_size_cases.items():
+			with self.subTest(structure=structure):
+				rawutil.pack(structure, *input_data)
+				self.assertEqual(rawutil.packed_size(structure, *input_data), size)
+
 
 	def test_names(self):
 		format = "B 'val1'  B 'val2'  B 'val3'"

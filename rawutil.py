@@ -192,13 +192,16 @@ _StructureCharacter = collections.namedtuple("_StructureCharacter", [
 	"is_control",         # True if it is a control character that does not correspond to any actual data
 	"fixed_size",         # Fixed size of the type in bytes (-> 4<char> has size 4 * fixed_size), or None if it has no such fixed size
 	
+	# Defaults to True
+	"has_output",         # True if it corresponds to a value in the unpacked list
+	
 	# Type-specific, with defaults
 	"closing_character",  # For substructures : Corresponding closing character
 	"is_signed",          # For integer types : True if it is a signed integer
 	"nof_exponent_bits",  # For floating-point types : Number of exponent bits in the IEEE754 structure
 	"nof_mantissa_bits",  # For floating-point types : Number of mantissa bits in the IEEE754 structure
 	"exponent_bias",      # For floating-point types : Offset applied to the encoded exponent in the IEEE754 structure
-], defaults=[None, False, False, False, False, False, False, None, None, False, None, None, None])
+], defaults=[None, False, False, False, False, False, False, None, True, None, False, None, None, None])
 
 _STRUCTURE_CHARACTERS = {
 	# Integer types
@@ -230,9 +233,9 @@ _STRUCTURE_CHARACTERS = {
 	"$": _StructureCharacter("$", has_count=False, is_final=True, fixed_size=None),
 
 	# Padding and alignment
-	"x": _StructureCharacter("x", has_count=True, is_direct_count=True, fixed_size=1),
-	"a": _StructureCharacter("a", has_count=True, is_direct_count=False, fixed_size=None),
-	"|": _StructureCharacter("|", has_count=False, is_control=True, fixed_size=0),
+	"x": _StructureCharacter("x", has_count=True, is_direct_count=True, has_output=False, fixed_size=1),
+	"a": _StructureCharacter("a", has_count=True, is_direct_count=False, has_output=False, fixed_size=None),
+	"|": _StructureCharacter("|", has_count=False, is_control=True, has_output=False, fixed_size=0),
 
 	# Substructures
 	"(": _StructureCharacter("(", is_substructure=True, has_count=True, is_direct_count=False, closing_character=")"),
@@ -942,10 +945,11 @@ class Struct (object):
 					position += 1
 				elif character.fixed_size is not None:
 					total_size += count * character.fixed_size
-					if character.is_direct_count:
-						position += count
-					else:
-						position += 1
+					if character.has_output:
+						if character.is_direct_count:
+							position += count
+						else:
+							position += 1
 				elif token.type == "n":
 					for _ in range(count):
 						string = self._encode_string(data[position])
