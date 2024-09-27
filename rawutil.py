@@ -58,7 +58,9 @@ FORMAT STRINGS REFERENCE :
 	- `m` : padded null-terminated string (always read the full size, for instance
 	        `16m` reads 16 bytes, but returns the string up to the first null byte)
 	- `X` : hexadecimal string, works like `s` but converts to hex
-	- `x` : padding byte, packed as 0x00, not included in the unpacked data
+	- `x` : padding byte, packed as 0x00, not included in the unpacked data.
+	        These elements don’t count towards references (e.x. in '2x B /0(I)', 
+			the `/0` reference points to the `B` element)
 	- `a` : alignment, pads with null bytes until the next multiple of the count
 	- `|` : alignment reference, `a` formats align according to the beginning of
 			the format or the previous `|` character

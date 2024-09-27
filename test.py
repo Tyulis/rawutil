@@ -170,13 +170,26 @@ class StructureTestCase (unittest.TestCase):
 				self.assertEqual(rawutil.pack(byteorder + "cxc", b"A", b"Z"), b"A\x00Z")
 
 			with self.subTest(part="unpacking", byteorder=byteorder):
-				#with self.assertRaises(rawutil.DataError):
 				self.assertEqual(len(rawutil.unpack(byteorder + "x", b"")), 0)
 				self.assertEqual(len(rawutil.unpack(byteorder + "x", b"\x00")), 0)
 				self.assertEqual(len(rawutil.unpack(byteorder + "5x", b"\x00\x00\x00\x00\x00")), 0)
 				self.assertSequenceEqual(rawutil.unpack(byteorder + "xc", b"\x00Z"), [b"Z"])
 				self.assertSequenceEqual(rawutil.unpack(byteorder + "cx", b"A\x00"), [b"A"])
 				self.assertSequenceEqual(rawutil.unpack(byteorder + "cxc", b"A\x00Z"), [b"A", b"Z"])
+	
+
+	padding_reference_cases = [
+		("B 2x B /0s /1s", b"\x02\x00\x00\x04ABspam", [2, 4, b"AB", b"spam"]),
+		("B 2x /p1s",      b"\x04\x00\x00spam",       [4, b"spam"]),
+	]
+	def test_padding_reference_behaviour(self):
+		with self.subTest(part="unpacking"):
+			for structure, packed_data, unpacked_data in self.padding_reference_cases:
+				self.assertSequenceEqual(rawutil.unpack(structure, packed_data), unpacked_data)
+		
+		with self.subTest(part="packing"):
+			for structure, packed_data, unpacked_data in self.padding_reference_cases:
+				self.assertEqual(rawutil.pack(structure, *unpacked_data), packed_data)
 	
 	def test_padding_byte(self):
 		for padding_byte in (0x00, 0xFF):

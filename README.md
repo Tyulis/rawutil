@@ -315,7 +315,7 @@ There are several format characters, that define various data types. Simple data
 | d    | double | 8    | IEEE 754 double-precision floating-point number |
 | F    | quad   | 16   | IEEE 754 quadruple-precision floating-point number |
 | c    | char   | 1    | Character (returned as a 1-byte bytes object) |
-| x    | void   | 1    | Convenience padding byte. Takes no data to pack (it simply inserts a null byte) nor returns anything. **Does not fail** when there is no more data to read. To fail in that case, just use a normal `c` |
+| x    | void   | 1    | Convenience padding byte. Takes no data to pack (it simply inserts a padding byte as defined by the `padding_byte` argument, a null byte by default) nor returns anything. **Does not fail** when there is no more data to read. To fail in that case, just use a normal `c`. Those don’t count towards references : for instance, in `'2x B /0(I)'`, the `/0` reference points to the `B` element |
 
 A number before a simple format character may be added to indicate a repetition : `"4I"` means four 32-bits unsigned integers, and is equivalent to `"IIII"`.
 
@@ -324,6 +324,7 @@ There also exist "special" format characters that define more complex types and 
 | Chr. | Type   | Description |
 | ---- | ------ | ----------- |
 | s    | char[] | Fixed-length string. Represents a string of a given length, for example `"16s"` represents a 16-byte string. Returned as a single `bytes` object (as a contrary to `c` that only returns individual characters) |
+| m    | string | Padded null-terminated string. Represents a fixed-length buffer that contains a string, padded with null bytes. For example `"8m"` with string `SPAM` represents bytes `SPAM\0\0\0\0`, `"6m"` with "C0FFEE" is `COFFEE`, without padding. The null bytes are not removed when unpacking, and are automatically added when packing.
 | n    | string | Null-terminated string. To unpack, reads until a null byte is found and returns the result as a `bytes` object, without the null byte. Packs the given bytes, and adds a null byte at the end.
 | X    | hex    | Works like `s`, but returns the result as an hexadecimal string. |
 | a    |        | Inserts null bytes / reads until the data length reaches the next multiple of the given number (for example, `"4a"` goes to the next multiple of 4). Does not return anything and does not take input data to pack. |
