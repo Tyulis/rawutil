@@ -352,6 +352,10 @@ class StructureTestCase (unittest.TestCase):
 		("<3n", [b"spam", b"ham", b"eggs"], b"spam\x00ham\x00eggs\x00"),
 		("B /0n", [3, b"spam", b"ham", b"eggs"], b"\x03spam\x00ham\x00eggs\x00"),
 		("B /p1n", [2, b"foo", b"bar"], b"\x02foo\x00bar\x00"),
+		("<4m 4m 4m", [b"spam", b"ham", b""], b"spamham\x00\x00\x00\x00\x00"),
+		(">4m 4m 4m", [b"spam", b"ham", b""], b"spamham\x00\x00\x00\x00\x00"),
+		("B /0m", [4, b"ham"], b"\x04ham\x00"),
+		("B /p1m", [4, b"ham"], b"\x04ham\x00"),
 		(">4X", ["deadbeef"], b"\xDE\xAD\xBE\xEF"),
 		("<4X", ["deadbeef"], b"\xDE\xAD\xBE\xEF"),
 		("B /0X", [4, "deadbeef"], b"\x04\xDE\xAD\xBE\xEF"),
@@ -365,6 +369,12 @@ class StructureTestCase (unittest.TestCase):
 			with self.subTest(structure=structure, unpacked=unpacked, packed=packed):
 				self.assertSequenceEqual(rawutil.unpack(structure, packed), unpacked)
 				self.assertEqual(rawutil.pack(structure, *unpacked), packed)
+	
+	def test_string_length_error(self):
+		with self.assertRaises(rawutil.OperationError):
+			rawutil.pack("4s", "DEADBEEF")
+		with self.assertRaises(rawutil.OperationError):
+			rawutil.pack("4m", "DEADBEEF")
 
 	def test_dollar_error(self):
 		with self.assertRaises(rawutil.FormatError):

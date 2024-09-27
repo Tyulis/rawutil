@@ -55,6 +55,8 @@ FORMAT STRINGS REFERENCE :
 			16-bytes string), as a `bytes` object
 	- `n` : null-terminated string (stops at the first null byte, null byte is
 			not included). The count gives a number of strings, not the length
+	- `m` : padded null-terminated string (always read the full size, for instance
+	        `16m` reads 16 bytes, but returns the string up to the first null byte)
 	- `X` : hexadecimal string, works like `s` but converts to hex
 	- `x` : padding byte, packed as 0x00, not included in the unpacked data
 	- `a` : alignment, pads with null bytes until the next multiple of the count
@@ -230,6 +232,7 @@ _STRUCTURE_CHARACTERS = {
 	"s": _StructureCharacter("s", has_count=True, is_direct_count=False, fixed_size=1),
 	"X": _StructureCharacter("X", has_count=True, is_direct_count=False, fixed_size=1),
 	"n": _StructureCharacter("n", has_count=True, is_direct_count=True,  fixed_size=None),
+	"m": _StructureCharacter("m", has_count=True, is_direct_count=False, fixed_size=1),
 	"$": _StructureCharacter("$", has_count=False, is_final=True, fixed_size=None),
 
 	# Padding and alignment
@@ -784,6 +787,8 @@ class Struct (object):
 					unpacked.extend([bytes((byte, )) for byte in elementdata])
 				elif token.type == "s":
 					unpacked.append(_read(data, count))
+				elif token.type == "m":
+					unpacked.append(_read(data, count).rstrip(b"\x00"))
 				elif token.type == "n":
 					for _ in range(count):
 						string = b""
@@ -866,6 +871,12 @@ class Struct (object):
 					if len(string) != count:
 						raise OperationError(_error_context(f"Length of structure element 's' {count} and data '{data[position] !r}' do not match", self.format, token.position))
 					out.write(string)
+					position += 1
+				elif token.type == "m":
+					string = self._encode_string(data[position])
+					if len(string) > count:
+						raise OperationError(_error_context(f"Input element '{data[position] !r}' is too long for structure element '{count}m' (found {len(data[position])} bytes, expected max. {count} bytes)", self.format, token.position))
+					out.write(string + b"\x00" * (count - len(string)))
 					position += 1
 				elif token.type == "n":
 					for _ in range(count):
