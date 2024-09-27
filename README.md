@@ -305,8 +305,8 @@ There are several format characters, that define various data types. Simple data
 | u    | int24  | 3    | 24 bits signed integer |
 | U    | uint24 | 3    | 24 bits unsigned integer |
 | i    | int32  | 4    | 32 bits signed integer |
-| I    | uint32 | 4    | 32 bits unsigned integer |
-| l    | int32  | 4    | 32 bits signed integer (same as `i`) |
+| I    | uint32 | 4    | (uppercase `i`) 32 bits unsigned integer |
+| l    | int32  | 4    | (lowercase `L`) 32 bits signed integer (same as `i`) |
 | L    | uint32 | 4    | 32 bits unsigned integer (same as `I`) |
 | q    | int64  | 8    | 64 bits signed integer |
 | Q    | uint64 | 8    | 64 bits unsigned integer |
@@ -324,7 +324,7 @@ There also exist "special" format characters that define more complex types and 
 | Chr. | Type   | Description |
 | ---- | ------ | ----------- |
 | s    | char[] | Fixed-length string. Represents a string of a given length, for example `"16s"` represents a 16-byte string. Returned as a single `bytes` object (as a contrary to `c` that only returns individual characters) |
-| m    | string | Padded null-terminated string. Represents a fixed-length buffer that contains a string, padded with null bytes. For example `"8m"` with string `SPAM` represents bytes `SPAM\0\0\0\0`, `"6m"` with "C0FFEE" is `COFFEE`, without padding. The null bytes are not removed when unpacking, and are automatically added when packing.
+| m    | string | Fixed-length padded string. Represents a fixed-length buffer that contains a string, padded with null bytes. For example `"8m"` with string `SPAM` represents bytes `SPAM\0\0\0\0`, `"6m"` with "C0FFEE" is `COFFEE`, without padding. The null bytes are removed when unpacking, and are automatically added when packing.
 | n    | string | Null-terminated string. To unpack, reads until a null byte is found and returns the result as a `bytes` object, without the null byte. Packs the given bytes, and adds a null byte at the end.
 | X    | hex    | Works like `s`, but returns the result as an hexadecimal string. |
 | a    |        | Inserts null bytes / reads until the data length reaches the next multiple of the given number (for example, `"4a"` goes to the next multiple of 4). Does not return anything and does not take input data to pack. |
